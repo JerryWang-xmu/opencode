@@ -1,3 +1,118 @@
+# PROJECT KNOWLEDGE BASE
+
+**Generated:** 2026-05-25
+**Branch:** dev (default)
+
+## OVERVIEW
+OpenCode — open-source AI coding agent. Monorepo (Bun workspaces + Turborepo) with 21 packages. Stack: TypeScript 5.8, Effect v4, SolidJS, Drizzle/SQLite, Electron, Astro. CLI ships as platform-specific native binaries via npm.
+
+## STRUCTURE
+```
+packages/
+├── opencode/       # Core CLI/TUI/server — the main product
+├── core/           # Shared schemas, Effect services, plugin system
+├── llm/            # Schema-first LLM core (provider-agnostic)
+├── app/            # SolidJS web UI (shared by desktop + browser)
+├── ui/             # Shared UI component library
+├── desktop/        # Electron app (sidecar architecture)
+├── console/        # SaaS platform (nested monorepo: app/core/function/mail/resource)
+├── enterprise/     # Teams/enterprise SolidStart app
+├── web/            # Marketing/docs site (Astro + Starlight)
+├── sdk/js/         # JavaScript SDK (OpenAPI codegen)
+├── plugin/         # Plugin system runtime
+├── effect-drizzle-sqlite/  # Vendored Drizzle Effect SQLite adapter
+├── http-recorder/  # HTTP recording for tests
+├── function/       # Cloudflare Workers (opencode.ai API)
+├── containers/     # CI Docker images (base, bun-node, rust, tauri, publish)
+├── identity/       # Logo/brand assets only (no code)
+├── extensions/zed/ # Zed editor extension config
+├── storybook/      # UI component Storybook
+├── script/         # Shared build script utilities
+├── slack/          # Slack integration
+└── docs/           # Documentation helpers
+sdks/vscode/        # VS Code extension (OUTSIDE workspace, own bun.lock)
+infra/              # SST infrastructure (Cloudflare, PlanetScale, Stripe)
+github/             # GitHub Action (outside packages/, own bun.lock)
+script/             # Root-level release/build scripts (not a package)
+nix/                # Nix flake packaging
+specs/              # Design specifications
+patches/            # Dependency patches (6 patched deps)
+```
+
+## WHERE TO LOOK
+| Task | Location | Notes |
+|------|----------|-------|
+| CLI commands | `packages/opencode/src/cli/cmd/` | yargs-based, 20+ subcommands |
+| TUI (terminal UI) | `packages/opencode/src/cli/cmd/tui/` | SolidJS rendered via @opentui/solid |
+| HTTP server | `packages/opencode/src/server/` | Effect HTTP + Hono, SSE + WebSocket |
+| AI tools | `packages/opencode/src/tool/` | 46 files — edit, grep, shell, etc. |
+| Session management | `packages/opencode/src/session/` | LLM orchestration, message processing |
+| Config system | `packages/opencode/src/config/` | Self-export pattern |
+| Database schema | `packages/opencode/src/**/*.sql.ts` | Drizzle, snake_case |
+| LLM providers | `packages/llm/src/providers/` | Facade pattern over routes |
+| LLM protocols | `packages/llm/src/protocols/` | OpenAI, Anthropic, Gemini, Bedrock |
+| Plugin system | `packages/core/src/plugin/` | Hook-based, 31 provider plugins |
+| Shared schemas | `packages/core/src/schema.ts` | Branded types, withStatics |
+| Web UI components | `packages/app/src/components/` | SolidJS |
+| UI library | `packages/ui/src/components/` | Shared component library |
+| Desktop main | `packages/desktop/src/main/` | Electron main + sidecar spawner |
+| Console app | `packages/console/app/` | SolidStart, billing, workspace mgmt |
+| Infrastructure | `infra/` + `sst.config.ts` | SST v4, Cloudflare-focused |
+| VS Code extension | `sdks/vscode/` | Separate from workspace |
+
+## COMMANDS
+```bash
+bun dev                    # CLI in dev mode (TUI)
+bun dev:web                # Web UI dev server (needs backend at :4096)
+bun dev:desktop            # Electron desktop dev
+bun dev:console            # Console app dev
+bun run lint               # OxLint (type-aware)
+bun turbo typecheck        # Full monorepo typecheck
+bun run db generate --name <slug>  # Drizzle migration (from packages/opencode)
+bun test                   # Run from package dirs ONLY, never root
+bunx playwright install chromium && bun run test:e2e:local  # E2E (from packages/app)
+./packages/sdk/js/script/build.ts  # Regenerate JS SDK
+```
+
+## CONVENTIONS
+- **No semicolons** (Prettier: `semi: false`), 2-space indent, 120-char print width, LF line endings
+- **Effect v4** throughout core: `Effect.gen(function* () {...})`, `Effect.fn("Domain.method")`, `Effect.void`
+- **Self-export pattern**: `export * as Foo from "./foo"` — no `export namespace`, no barrel `index.ts` in multi-sibling dirs
+- **Module resolution**: Bun-native with `"exports": { "./*": "./src/*.ts" }` — direct TypeScript imports
+- **Conditional imports**: `#db` for bun vs node SQLite, `#pty` for bun vs node PTY
+- **Platform files**: `*.bun.ts` / `*.node.ts` for runtime-specific code
+- **Prompt templates**: `.txt` files alongside TypeScript tool implementations
+- **Catalog versions**: Root `package.json` uses Bun's `catalog:` for dependency pinning
+- **Exact installs**: `bunfig.toml` sets `exact = true` + 3-day `minimumReleaseAge`
+- **Pre-push hook**: Validates Bun version matches `packageManager` field, runs `bun typecheck`
+
+## ANTI-PATTERNS (THIS PROJECT)
+- **Never run tests from repo root** — enforced by `bunfig.toml` guard
+- **Never run `tsc` directly** — use `bun typecheck` from package dirs
+- **Never use `export namespace`** — breaks tree-shaking and Node's TS runner
+- **Never use `Effect.fork` / `Effect.forkDaemon`** — use `Effect.forkIn(scope)` (v4 API)
+- **Never restart the app/server in debugging** — explicit rule in packages/app
+- **`as any` is forbidden** by style guide (586 violations exist — known debt, don't add more)
+- **No barrel `index.ts`** in multi-sibling directories — defeats tree-shaking
+- **No `try`/`catch`** where avoidable, no `else` statements, prefer `const` + ternary
+
+## UNIQUE STYLES
+- **Native binary distribution**: CLI ships as platform-specific npm packages (`opencode-darwin-arm64`, etc.). `bin/opencode` is a CJS shim that detects AVX2, musl/glibc, and spawns the right binary.
+- **TUI as SolidJS**: Terminal UI uses `@opentui/solid` to render SolidJS in terminal — same framework as web/desktop.
+- **Worker thread TUI**: Default `opencode` command spawns TUI in a worker thread with RPC bridge.
+- **Desktop sidecar**: Electron runs opencode server as a utility process (sidecar), not in-process.
+- **AI-powered CI**: Multiple GitHub workflows use OpenCode AI agent for PR review, issue triage, beta conflict resolution, docs updates.
+
+## NOTES
+- `packages/console/` is a nested monorepo (app/core/function/mail/resource) — each sub-package is individually referenced in root workspaces.
+- `sdks/vscode/` and `github/` are outside the workspace with their own `bun.lock`.
+- 6 dependencies are patched via `patchedDependencies` (solid-js, virtua, @ai-sdk/xai, etc.).
+- `packages/identity/` and `packages/extensions/zed/` contain only assets/config — no code.
+- The `effect-drizzle-sqlite` package is vendored — keep it generic, no opencode-specific code.
+- `packages/opencode/src/session/processor.ts` has 15x `TODO(v2): Temporary dual-write` — migration debt.
+
+---
+
 - To regenerate the JavaScript SDK, run `./packages/sdk/js/script/build.ts`.
 - ALWAYS USE PARALLEL TOOLS WHEN APPLICABLE.
 - The default branch in this repo is `dev`.

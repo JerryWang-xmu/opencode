@@ -15,6 +15,8 @@ import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
 import { Skill } from "@/skill"
+import { SystemCache } from "./system-cache"
+import { MemoryRetrieval } from "@/memory/retrieval"
 
 export function provider(model: Provider.Model) {
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
@@ -35,6 +37,10 @@ export function provider(model: Provider.Model) {
 export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
+  readonly memories: (input: {
+    query: string
+    maxResults?: number
+  }) => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SystemPrompt") {}
@@ -43,11 +49,22 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const skill = yield* Skill.Service
+    const cache = yield* SystemCache.Service
+    const retrieval = yield* MemoryRetrieval.Service
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
+        const cacheKey = yield* cache.computeKey({
+          modelID: `${model.providerID}/${model.api.id}`,
+          agentName: "",
+          instructions: [],
+          skills: undefined,
+        })
+        const cached = yield* cache.get(cacheKey)
+        if (cached) return cached
+
         const ctx = yield* InstanceState.context
-        return [
+        const result = [
           [
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
@@ -60,25 +77,66 @@ export const layer = Layer.effect(
             `</env>`,
           ].join("\n"),
         ]
+
+        yield* cache.set(cacheKey, result)
+        return result
       }),
 
       skills: Effect.fn("SystemPrompt.skills")(function* (agent: Agent.Info) {
         if (Permission.disabled(["skill"], agent.permission).has("skill")) return
 
         const list = yield* skill.available(agent)
+        const skillsKey = list.map((s) => s.name).sort().join(",")
 
-        return [
+        const cacheKey = yield* cache.computeKey({
+          modelID: "",
+          agentName: agent.name,
+          instructions: [],
+          skills: skillsKey,
+        })
+        const cached = yield* cache.get(cacheKey)
+        if (cached) return cached[0]
+
+        const result = [
           "Skills provide specialized instructions and workflows for specific tasks.",
           "Use the skill tool to load a skill when a task matches its description.",
           // the agents seem to ingest the information about skills a bit better if we present a more verbose
           // version of them here and a less verbose version in tool description, rather than vice versa.
           Skill.fmt(list, { verbose: true }),
         ].join("\n")
+
+        yield* cache.set(cacheKey, [result])
+        return result
+      }),
+
+      memories: Effect.fn("SystemPrompt.memories")(function* (input: {
+        query: string
+        maxResults?: number
+      }) {
+        const results = yield* retrieval.retrieve({
+          query: input.query,
+          maxResults: input.maxResults ?? 5,
+        })
+
+        if (results.length === 0) return undefined
+
+        const lines = [
+          "<memories>",
+          "## Relevant Memories",
+          ...results.map((entry) => `- **${entry.name}**: ${entry.content}`),
+          "</memories>",
+        ]
+
+        return lines.join("\n")
       }),
     })
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(Skill.defaultLayer))
+export const defaultLayer = layer.pipe(
+  Layer.provide(Skill.defaultLayer),
+  Layer.provide(SystemCache.layer),
+  Layer.provide(MemoryRetrieval.defaultLayer),
+)
 
 export * as SystemPrompt from "./system"

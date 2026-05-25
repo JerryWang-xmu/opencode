@@ -61,6 +61,7 @@ import { referencePromptMetadata, referenceTextPart } from "./prompt/reference"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { MemoryExtraction } from "@/memory/extraction"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -129,6 +130,7 @@ export const layer = Layer.effect(
     const references = yield* Reference.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const extraction = yield* MemoryExtraction.Service
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -276,6 +278,8 @@ export const layer = Layer.effect(
           agent: ag,
           user: firstInfo,
           system: [],
+          staticSystem: [],
+          dynamicSystem: [],
           small: true,
           tools: {},
           model: mdl,
@@ -1248,6 +1252,7 @@ export const layer = Layer.effect(
         const slog = elog.with({ sessionID })
         let structured: unknown
         let step = 0
+        let lastQueryText = ""
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1402,12 +1407,15 @@ export const layer = Layer.effect(
             )
 
             if (lastUser.format?.type === "json_schema") {
-              tools["StructuredOutput"] = createStructuredOutputTool({
-                schema: lastUser.format.schema,
-                onSuccess(output) {
-                  structured = output
-                },
-              })
+              tools["StructuredOutput"] = Object.assign(
+                createStructuredOutputTool({
+                  schema: lastUser.format.schema,
+                  onSuccess(output) {
+                    structured = output
+                  },
+                }),
+                { concurrency: { mode: "serial" as const } },
+              )
             }
 
             if (step === 1)
@@ -1433,22 +1441,34 @@ export const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
+            yield* compaction.microCompact({ sessionID })
+
             const [skills, env, instructions, modelMsgs] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
               MessageV2.toModelMessagesEffect(msgs, model),
             ])
-            const system = [...env, ...instructions, ...(skills ? [skills] : [])]
+            const staticSystem = [...env, ...instructions, ...(skills ? [skills] : [])]
+            const dynamicSystem: string[] = []
             const format = lastUser.format ?? { type: "text" as const }
-            if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            if (format.type === "json_schema") dynamicSystem.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            const queryText = lastUserMsg?.parts
+              .filter((p): p is MessageV2.TextPart => p.type === "text")
+              .map((p) => p.text)
+              .join(" ") ?? ""
+            lastQueryText = queryText
+            const memoriesResult = yield* sys.memories({ query: queryText })
+            if (memoriesResult) dynamicSystem.push(memoriesResult)
             const result = yield* handle.process({
               user: lastUser,
               agent,
               permission: session.permission,
               sessionID,
               parentSessionID: session.parentID,
-              system,
+              system: [],
+              staticSystem,
+              dynamicSystem,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS }] : [])],
               tools,
               model,
@@ -1494,6 +1514,9 @@ export const layer = Layer.effect(
         }
 
         yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
+        if (lastQueryText) {
+          yield* extraction.extract({ conversation: lastQueryText, maxEntries: 3 }).pipe(Effect.ignore, Effect.forkIn(scope))
+        }
         return yield* lastAssistant(sessionID)
       },
     )
@@ -1667,6 +1690,7 @@ export const defaultLayer = Layer.suspend(() =>
         SystemPrompt.defaultLayer,
         LLM.defaultLayer,
         Reference.defaultLayer,
+        MemoryExtraction.defaultLayer,
         Bus.layer,
         CrossSpawnSpawner.defaultLayer,
         RuntimeFlags.defaultLayer,

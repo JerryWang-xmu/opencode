@@ -5,6 +5,8 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { Skill } from "../../src/skill"
 import { Permission } from "../../src/permission"
 import { SystemPrompt } from "../../src/session/system"
+import { SystemCache } from "../../src/session/system-cache"
+import { MemoryRetrieval } from "../../src/memory/retrieval"
 import { testEffect } from "../lib/effect"
 
 const skills: Skill.Info[] = [
@@ -55,6 +57,15 @@ const it = testEffect(
           all: () => Effect.succeed(skills),
           dirs: () => Effect.succeed([]),
           available: () => Effect.succeed(skills),
+        }),
+      ),
+    ),
+    Layer.provide(SystemCache.layer),
+    Layer.provide(
+      Layer.succeed(
+        MemoryRetrieval.Service,
+        MemoryRetrieval.Service.of({
+          retrieve: () => Effect.succeed([]),
         }),
       ),
     ),

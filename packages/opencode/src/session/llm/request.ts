@@ -23,6 +23,8 @@ type PrepareInput = {
   readonly agent: Agent.Info
   readonly permission?: Permission.Ruleset
   readonly system: string[]
+  readonly staticSystem?: string[]
+  readonly dynamicSystem?: string[]
   readonly messages: ModelMessage[]
   readonly small?: boolean
   readonly tools: Record<string, Tool>
@@ -53,26 +55,64 @@ const mergeOptions = (target: Record<string, any>, source: Record<string, any> |
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
-  const system = [
-    [
-      ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
-      ...input.system,
-      ...(input.user.system ? [input.user.system] : []),
-    ]
-      .filter((x) => x)
-      .join("\n"),
-  ]
 
-  const header = system[0]
-  yield* input.plugin.trigger(
-    "experimental.chat.system.transform",
-    { sessionID: input.sessionID, model: input.model },
-    { system },
-  )
-  if (system.length > 2 && system[0] === header) {
-    const rest = system.slice(1)
-    system.length = 0
-    system.push(header, rest.join("\n"))
+  // When staticSystem/dynamicSystem are provided, use the split path for prompt cache optimization.
+  // Otherwise fall back to the legacy system[] path for backward compatibility.
+  const hasSplitSystem = input.staticSystem !== undefined || input.dynamicSystem !== undefined
+
+  // Static part: base template + env + instructions + skills (stable across turns)
+  const staticPart = [
+    ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
+    ...(hasSplitSystem ? (input.staticSystem ?? []) : input.system),
+  ]
+    .filter((x) => x)
+    .join("\n")
+
+  // Dynamic part: structured output + user override + plugin transforms (changes per turn)
+  const dynamicParts = [
+    ...(hasSplitSystem ? (input.dynamicSystem ?? []) : []),
+    ...(input.user.system ? [input.user.system] : []),
+  ].filter((x) => x)
+  const dynamicPart = dynamicParts.join("\n")
+
+  const isAnthropic = input.model.providerID === "anthropic"
+
+  let system: string[]
+  if (isAnthropic) {
+    // Anthropic: send as separate system messages with cache_control on static block
+    system = [staticPart]
+    if (dynamicPart) system.push(dynamicPart)
+
+    // Apply plugin transform to dynamic part only
+    const dynamicArr = [system[1] ?? ""]
+    yield* input.plugin.trigger(
+      "experimental.chat.system.transform",
+      { sessionID: input.sessionID, model: input.model },
+      { system: dynamicArr },
+    )
+    // Collapse plugin-added elements back into single dynamic string
+    if (dynamicArr.length > 1) {
+      dynamicArr.splice(0, dynamicArr.length, dynamicArr.join("\n"))
+    }
+    if (dynamicArr[0]) {
+      system[1] = dynamicArr[0]
+    } else if (system.length > 1) {
+      system.length = 1
+    }
+  } else {
+    // Non-Anthropic: join into single string (current behavior)
+    system = [[staticPart, dynamicPart].filter((x) => x).join("\n")]
+    const header = system[0]
+    yield* input.plugin.trigger(
+      "experimental.chat.system.transform",
+      { sessionID: input.sessionID, model: input.model },
+      { system },
+    )
+    if (system.length > 2 && system[0] === header) {
+      const rest = system.slice(1)
+      system.length = 0
+      system.push(header, rest.join("\n"))
+    }
   }
 
   const variant =
@@ -94,9 +134,12 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
       ? input.messages
       : [
           ...system.map(
-            (x): ModelMessage => ({
+            (x, i): ModelMessage => ({
               role: "system",
               content: x,
+              ...(isAnthropic && i === 0
+                ? { providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } } }
+                : {}),
             }),
           ),
           ...input.messages,

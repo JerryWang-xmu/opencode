@@ -189,6 +189,7 @@ export interface Interface {
     model: Provider.Model
   }) => Effect.Effect<boolean>
   readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
+  readonly microCompact: (input: { sessionID: SessionID }) => Effect.Effect<number>
   readonly process: (input: {
     parentID: MessageID
     messages: MessageV2.WithParts[]
@@ -341,6 +342,40 @@ export const layer = Layer.effect(
       }
     })
 
+    const MICRO_COMPACT_DEFAULT_AGE_MINUTES = 10
+    const MICRO_COMPACT_DEFAULT_TOOLS = ["read", "grep", "glob", "lsp"]
+
+    const microCompact = Effect.fn("SessionCompaction.microCompact")(function* (input: { sessionID: SessionID }) {
+      const cfg = yield* config.get()
+      if (cfg.micro_compact?.enabled === false) return 0
+
+      const ageMinutes = cfg.micro_compact?.age_minutes ?? MICRO_COMPACT_DEFAULT_AGE_MINUTES
+      const eligibleTools = new Set(cfg.micro_compact?.tools ?? MICRO_COMPACT_DEFAULT_TOOLS)
+      const cutoff = Date.now() - ageMinutes * 60 * 1000
+
+      const msgs = yield* session
+        .messages({ sessionID: input.sessionID })
+        .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
+      if (!msgs) return 0
+
+      let compacted = 0
+      for (const msg of msgs) {
+        for (const part of msg.parts) {
+          if (part.type !== "tool") continue
+          if (part.state.status !== "completed") continue
+          if (part.state.time.compacted) continue
+          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
+          if (!eligibleTools.has(part.tool)) continue
+          if (part.state.time.end >= cutoff) continue
+
+          part.state.time.compacted = Date.now()
+          yield* session.updatePart(part)
+          compacted++
+        }
+      }
+      return compacted
+    })
+
     const processCompaction = Effect.fn("SessionCompaction.process")(function* (input: {
       parentID: MessageID
       messages: MessageV2.WithParts[]
@@ -446,6 +481,8 @@ export const layer = Layer.effect(
         sessionID: input.sessionID,
         tools: {},
         system: [],
+        staticSystem: [],
+        dynamicSystem: [],
         messages: [
           ...modelMessages,
           {
@@ -616,6 +653,7 @@ export const layer = Layer.effect(
     return Service.of({
       isOverflow,
       prune,
+      microCompact,
       process: processCompaction,
       create,
     })

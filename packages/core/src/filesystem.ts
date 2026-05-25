@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { dirname, join, relative, resolve as pathResolve } from "path"
+import { dirname, join, relative, resolve as pathResolve, sep } from "path"
 import { realpathSync } from "fs"
 import * as NFS from "fs/promises"
 import { lookup } from "mime-types"
@@ -241,7 +241,10 @@ export namespace AppFileSystem {
     return !relA || !relA.startsWith("..") || !relB || !relB.startsWith("..")
   }
 
-  export function contains(parent: string, child: string) {
-    return !relative(parent, child).startsWith("..")
+  export function contains(parent: string, child: string): boolean {
+    const normalizedParent = pathResolve(parent)
+    const normalizedChild = pathResolve(child)
+    const parentWithSep = normalizedParent.endsWith(sep) ? normalizedParent : normalizedParent + sep
+    return normalizedChild.startsWith(parentWithSep) || normalizedChild === normalizedParent
   }
 }

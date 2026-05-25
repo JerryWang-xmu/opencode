@@ -63,6 +63,7 @@ import { RepositoryCache } from "../../src/reference/repository-cache"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { MemoryExtraction } from "@/memory/extraction"
 
 void Log.init({ print: false })
 
@@ -168,6 +169,7 @@ function makeHttp() {
       Layer.provide(SessionRevert.defaultLayer),
       Layer.provide(Image.defaultLayer),
       Layer.provide(Reference.defaultLayer),
+      Layer.provide(MemoryExtraction.defaultLayer),
       Layer.provide(SessionSummary.defaultLayer),
       Layer.provideMerge(run),
       Layer.provideMerge(compact),

@@ -7,6 +7,7 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Instruction } from "../../src/session/instruction"
+import { SystemCache } from "../../src/session/system-cache"
 import type { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, SessionID } from "../../src/session/schema"
 import { Global } from "@opencode-ai/core/global"
@@ -26,6 +27,7 @@ const instructionLayer = (global: Partial<Global.Interface>, flags: Partial<Runt
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(Global.layerWith(global)),
     Layer.provide(RuntimeFlags.layer(flags)),
+    Layer.provide(SystemCache.layer),
   )
 
 const provideInstruction =

@@ -1,3 +1,4 @@
+import os from "os"
 import path from "path"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -178,6 +179,20 @@ function clean(file: string) {
   return path.normalize(file.replace(/^\.[\\/]/, ""))
 }
 
+function systemBinPaths() {
+  const exe = process.platform === "win32" ? "rg.exe" : "rg"
+  const paths = new Set<string>()
+  // Current Global.Path.bin (may be overridden by tests)
+  paths.add(path.join(Global.Path.bin, exe))
+  // Default xdg-basedir cache (~/.cache on all platforms)
+  paths.add(path.join(os.homedir(), ".cache", "opencode", "bin", exe))
+  // Windows LOCALAPPDATA fallback
+  if (process.platform === "win32" && process.env.LOCALAPPDATA) {
+    paths.add(path.join(process.env.LOCALAPPDATA, "opencode", "bin", exe))
+  }
+  return Array.from(paths)
+}
+
 function row(data: Row): Row {
   return {
     ...data,
@@ -293,8 +308,11 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | ChildPro
           const system = yield* Effect.sync(() => which(process.platform === "win32" ? "rg.exe" : "rg"))
           if (system && (yield* fs.isFile(system).pipe(Effect.orDie))) return system
 
+          for (const candidate of systemBinPaths()) {
+            if (yield* fs.isFile(candidate).pipe(Effect.catch(() => Effect.succeed(false)))) return candidate
+          }
+
           const target = path.join(Global.Path.bin, `rg${process.platform === "win32" ? ".exe" : ""}`)
-          if (yield* fs.isFile(target).pipe(Effect.orDie)) return target
 
           const platformKey = `${process.arch}-${process.platform}` as keyof typeof PLATFORM
           const config = PLATFORM[platformKey]

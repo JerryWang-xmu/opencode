@@ -334,6 +334,7 @@ export const ReadTool = Tool.define(
     return {
       description: DESCRIPTION,
       parameters: Parameters,
+      concurrency: { mode: "parallel" } as const,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         run(params, ctx).pipe(Effect.orDie),
     }

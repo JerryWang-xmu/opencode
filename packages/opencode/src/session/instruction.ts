@@ -8,6 +8,7 @@ import { Flag } from "@opencode-ai/core/flag/flag"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { withTransientReadRetry } from "@/util/effect-http-client"
 import { Global } from "@opencode-ai/core/global"
+import { SystemCache } from "./system-cache"
 import type { MessageV2 } from "./message-v2"
 import type { MessageID } from "./schema"
 
@@ -51,7 +52,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/In
 export const layer: Layer.Layer<
   Service,
   never,
-  AppFileSystem.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service
+  AppFileSystem.Service | Config.Service | Global.Service | HttpClient.HttpClient | RuntimeFlags.Service | SystemCache.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -59,6 +60,7 @@ export const layer: Layer.Layer<
     const fs = yield* AppFileSystem.Service
     const global = yield* Global.Service
     const flags = yield* RuntimeFlags.Service
+    const cache = yield* SystemCache.Service
     const http = HttpClient.filterStatusOk(withTransientReadRetry(yield* HttpClient.HttpClient))
     const globalFiles = [
       path.join(global.config, "AGENTS.md"),
@@ -161,10 +163,22 @@ export const layer: Layer.Layer<
       const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
-      return [
+      const result = [
         ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
       ]
+
+      const cacheKey = yield* cache.computeKey({
+        modelID: "",
+        agentName: "",
+        instructions: result,
+        skills: undefined,
+      })
+      const cached = yield* cache.get(cacheKey)
+      if (cached) return cached
+
+      yield* cache.set(cacheKey, result)
+      return result
     })
 
     const find = Effect.fn("Instruction.find")(function* (dir: string) {
@@ -229,6 +243,7 @@ export const defaultLayer = layer.pipe(
   Layer.provide(AppFileSystem.defaultLayer),
   Layer.provide(FetchHttpClient.layer),
   Layer.provide(RuntimeFlags.defaultLayer),
+  Layer.provide(SystemCache.layer),
 )
 
 export function loaded(messages: MessageV2.WithParts[]) {

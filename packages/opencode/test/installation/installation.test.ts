@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, mock } from "bun:test"
 import { Effect, Layer, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -6,6 +6,13 @@ import { Installation } from "../../src/installation"
 import { InstallationChannel } from "@opencode-ai/core/installation/version"
 import { AppProcess } from "@opencode-ai/core/process"
 import { testEffect } from "../lib/effect"
+
+mock.module("@opencode-ai/core/npm-config", () => ({
+  NpmConfig: {
+    registry: () => Effect.succeed("https://registry.npmjs.org"),
+    load: () => Effect.succeed({}),
+  },
+}))
 
 const encoder = new TextEncoder()
 

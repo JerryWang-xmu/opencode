@@ -285,6 +285,13 @@ export const Info = Schema.Struct({
       }),
     }),
   ),
+  micro_compact: Schema.optional(
+    Schema.Struct({
+      enabled: Schema.optional(Schema.Boolean),
+      age_minutes: Schema.optional(PositiveInt),
+      tools: Schema.optional(Schema.Array(Schema.String)),
+    }),
+  ),
   experimental: Schema.optional(
     Schema.Struct({
       disable_paste_summary: Schema.optional(Schema.Boolean),

@@ -378,6 +378,10 @@ export const layer = Layer.effect(
         const files = yield* rg.files({ cwd: ctx.directory }).pipe(
           Stream.runCollect,
           Effect.map((chunk) => [...chunk]),
+          Effect.timeoutOrElse({
+            duration: "30 seconds",
+            orElse: () => Effect.succeed([] as string[]),
+          }),
         )
         const seen = new Set<string>()
         for (const file of files) {
