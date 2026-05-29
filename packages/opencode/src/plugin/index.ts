@@ -10,7 +10,7 @@ import { Bus } from "../bus"
 import * as Log from "@opencode-ai/core/util/log"
 import { createOpencodeClient } from "@opencode-ai/sdk"
 import { ServerAuth } from "@/server/auth"
-import { CodexAuthPlugin } from "./codex"
+import { CodexAuthPlugin } from "./openai/codex"
 import { Session } from "@/session/session"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
@@ -33,6 +33,7 @@ import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } fro
 import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { InstallationChannel } from "@opencode-ai/core/installation/version"
 
 const log = Log.create({ service: "plugin" })
 
@@ -84,18 +85,28 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") {}
 
+export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel?: string }) {
+  return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel)
+}
+
 // Built-in plugins that are directly imported (not installed from npm)
-const INTERNAL_PLUGINS: PluginInstance[] = [
-  CodexAuthPlugin,
-  CopilotAuthPlugin,
-  GitlabAuthPlugin,
-  PoeAuthPlugin,
-  CloudflareWorkersAuthPlugin,
-  CloudflareAIGatewayAuthPlugin,
-  AzureAuthPlugin,
-  DigitalOceanAuthPlugin,
-  XaiAuthPlugin,
-]
+function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
+  return [
+    // Temporary rollout: pre-release builds use WebSockets by default; releases require explicit opt-in.
+    (input) =>
+      CodexAuthPlugin(input, {
+        experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
+      }),
+    CopilotAuthPlugin,
+    GitlabAuthPlugin,
+    PoeAuthPlugin,
+    CloudflareWorkersAuthPlugin,
+    CloudflareAIGatewayAuthPlugin,
+    AzureAuthPlugin,
+    DigitalOceanAuthPlugin,
+    XaiAuthPlugin,
+  ]
+}
 
 function isServerPlugin(value: unknown): value is PluginInstance {
   return typeof value === "function"
@@ -237,7 +248,7 @@ export const layer = Layer.effect(
           } as PluginInput
         }
 
-        for (const plugin of flags.disableDefaultPlugins ? [] : INTERNAL_PLUGINS) {
+        for (const plugin of flags.disableDefaultPlugins ? [] : internalPlugins(flags)) {
           log.info("loading internal plugin", { name: plugin.name })
           const init = yield* Effect.tryPromise({
             try: () => plugin(makePluginInput()),
@@ -329,6 +340,20 @@ export const layer = Layer.effect(
             },
           }).pipe(Effect.ignore)
         }
+
+        yield* Effect.addFinalizer(() =>
+          Effect.forEach(
+            hooks,
+            (hook) =>
+              Effect.tryPromise({
+                try: () => Promise.resolve(hook.dispose?.()),
+                catch: (error) => {
+                  log.error("plugin dispose hook failed", { error })
+                },
+              }).pipe(Effect.ignore),
+            { discard: true },
+          ),
+        )
 
         // Subscribe to bus events, fiber interrupted when scope closes
         yield* (yield* bus.subscribeAll()).pipe(
