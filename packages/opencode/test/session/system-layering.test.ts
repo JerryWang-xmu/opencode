@@ -122,9 +122,11 @@ const noopFlags: RuntimeFlags.Info = {
   experimentalEventSystem: false,
   experimentalWorkspaces: false,
   experimentalIconDiscovery: false,
+  acpNext: false,
   outputTokenMax: undefined,
   bashDefaultTimeoutMs: undefined,
   experimentalNativeLlm: false,
+  experimentalWebSockets: false,
   client: "cli",
 }
 
