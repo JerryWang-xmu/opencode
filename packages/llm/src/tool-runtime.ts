@@ -71,7 +71,12 @@ export const stream = <T extends Tools>(options: StreamOptions<T>): Stream.Strea
     runtimeTools.length === 0
       ? options.request
       : LLMRequest.update(options.request, {
-          tools: [...options.request.tools.filter((tool) => !runtimeToolNames.has(tool.name)), ...runtimeTools],
+          tools: [
+            ...(options.request.tools
+              ? options.request.tools.filter((tool) => !runtimeToolNames.has(tool.name))
+              : []),
+            ...runtimeTools,
+          ],
         })
 
   const loop = (
@@ -93,7 +98,13 @@ export const stream = <T extends Tools>(options: StreamOptions<T>): Stream.Strea
         const modelStream = options
           .stream(request)
           .pipe(Stream.map((event) => indexStep(event, step)))
-          .pipe(Stream.tap((event) => Effect.sync(() => accumulate(state, event))))
+          .pipe(
+            Stream.tap((event) =>
+              Effect.sync(() => {
+                accumulate(state, event)
+              }),
+            ),
+          )
           .pipe(Stream.filter((event) => event.type !== "finish"))
 
         const continuation = Stream.unwrap(
@@ -111,12 +122,14 @@ export const stream = <T extends Tools>(options: StreamOptions<T>): Stream.Strea
             if (state.finishReason !== "tool-calls" || state.toolCalls.length === 0) return finishStream
             if (options.toolExecution === "none") return finishStream
 
+            // Execute all tools in parallel (this is the "streaming" optimization)
             const dispatched = yield* Effect.forEach(
               state.toolCalls,
               (call) =>
                 dispatch(tools, call).pipe(Effect.map((result) => [call, result.result, result.error] as const)),
               { concurrency },
             )
+
             const resultStream = Stream.fromIterable(
               dispatched.flatMap(([call, result, error]) => emitEvents(call, result, error)),
             )

@@ -13,6 +13,7 @@ import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SCOUT from "./prompt/scout.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import PROMPT_COORDINATOR from "./prompt/coordinator.txt"
 import { Permission } from "@/permission"
 import { mergeDeep, pipe, sortBy, values } from "remeda"
 import { Global } from "@opencode-ai/core/global"
@@ -278,6 +279,29 @@ export const layer = Layer.effect(
             ),
             prompt: PROMPT_SUMMARY,
           },
+          ...(flags.experimentalCoordinator
+            ? {
+                coordinator: {
+                  name: "coordinator",
+                  mode: "primary" as const,
+                  native: true,
+                  hidden: false,
+                  description: `Coordinator agent for orchestrating complex multi-step tasks. Use this when you need to break down complex requests into subtasks and delegate them to specialized agents (build, explore, scout, plan). The coordinator analyzes the task, selects appropriate agents, delegates subtasks, monitors progress, and synthesizes results.`,
+                  prompt: PROMPT_COORDINATOR,
+                  permission: Permission.merge(
+                    defaults,
+                    Permission.fromConfig({
+                      "*": "deny",
+                      task: "allow",
+                      todowrite: "allow",
+                      todoread: "allow",
+                    }),
+                    user,
+                  ),
+                  options: {},
+                },
+              }
+            : {}),
         }
 
         for (const [key, value] of Object.entries(cfg.agent ?? {})) {

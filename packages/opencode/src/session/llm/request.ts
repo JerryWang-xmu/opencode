@@ -33,6 +33,7 @@ type PrepareInput = {
   readonly plugin: Plugin.Interface
   readonly flags: RuntimeFlags.Info
   readonly isWorkflow: boolean
+  readonly latchedHeaders?: Record<string, string>
 }
 
 export type Prepared = {
@@ -202,29 +203,35 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     ? (yield* InstanceState.context).project.id
     : undefined
 
+  const computedHeaders = {
+    ...(input.model.providerID.startsWith("opencode")
+      ? {
+          ...(opencodeProjectID ? { "x-opencode-project": opencodeProjectID } : {}),
+          "x-opencode-session": input.sessionID,
+          "x-opencode-request": input.user.id,
+          "x-opencode-client": input.flags.client,
+          "User-Agent": USER_AGENT,
+        }
+      : {
+          "x-session-affinity": input.sessionID,
+          ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
+          "User-Agent": USER_AGENT,
+        }),
+    ...input.model.headers,
+    ...headers,
+  }
+
+  // Use latched headers if available (for prompt cache stability)
+  // Otherwise use computed headers
+  const finalHeaders = input.latchedHeaders ?? computedHeaders
+
   return {
     system,
     messages,
     tools: Object.fromEntries(Object.entries(tools).toSorted(([a], [b]) => a.localeCompare(b))),
     params,
     messageTransformOptions: options,
-    headers: {
-      ...(input.model.providerID.startsWith("opencode")
-        ? {
-            ...(opencodeProjectID ? { "x-opencode-project": opencodeProjectID } : {}),
-            "x-opencode-session": input.sessionID,
-            "x-opencode-request": input.user.id,
-            "x-opencode-client": input.flags.client,
-            "User-Agent": USER_AGENT,
-          }
-        : {
-            "x-session-affinity": input.sessionID,
-            ...(input.parentSessionID ? { "x-parent-session-id": input.parentSessionID } : {}),
-            "User-Agent": USER_AGENT,
-          }),
-      ...input.model.headers,
-      ...headers,
-    },
+    headers: finalHeaders,
   }
 })
 

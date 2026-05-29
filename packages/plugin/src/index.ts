@@ -53,6 +53,10 @@ export type WorkspaceAdapter = {
   target(config: WorkspaceInfo): WorkspaceTarget | Promise<WorkspaceTarget>
 }
 
+export type LLMClient = {
+  query(prompt: string, options?: { model?: string; system?: string; temperature?: number }): Promise<string>
+}
+
 export type PluginInput = {
   client: ReturnType<typeof createOpencodeClient>
   project: Project
@@ -63,6 +67,7 @@ export type PluginInput = {
   }
   serverUrl: URL
   $: BunShell
+  llm: LLMClient
 }
 
 export type PluginOptions = Record<string, unknown>
@@ -257,7 +262,7 @@ export interface Hooks {
     input: { sessionID: string; agent: string; model: Model; provider: ProviderContext; message: UserMessage },
     output: { headers: Record<string, string> },
   ) => Promise<void>
-  "permission.ask"?: (input: Permission, output: { status: "ask" | "deny" | "allow" }) => Promise<void>
+  "permission.ask"?: (input: Permission, output: { status: "ask" | "deny" }) => Promise<void>
   "command.execute.before"?: (
     input: { command: string; sessionID: string; arguments: string },
     output: { parts: Part[] },
@@ -330,4 +335,84 @@ export interface Hooks {
    * Modify tool definitions (description and parameters) sent to LLM
    */
   "tool.definition"?: (input: { toolID: string }, output: { description: string; parameters: any }) => Promise<void>
+  /**
+   * Agent executor hook - allows using LLM to process hook inputs and generate outputs.
+   * This enables plugins to use LLM reasoning to make decisions about tool execution,
+   * argument validation, result post-processing, and dynamic prompt generation.
+   *
+   * The hook receives the original hook input and can call the LLM client to generate
+   * a response that modifies the hook output.
+   *
+   * Example use cases:
+   * - Use LLM to validate/transform tool arguments before execution
+   * - Use LLM to post-process and summarize tool results
+   * - Use LLM to generate dynamic system prompts based on conversation context
+   * - Use LLM to decide whether to allow/deny tool execution based on context
+   *
+   * @example
+    * ```typescript
+    * "agent.executor": async (hookName, input, output, llm) => {
+    *   if (hookName === "tool.execute.before" && input.tool === "bash") {
+    *     const response = await llm.query(
+    *       `Analyze this bash command and decide if it's safe: ${input.args.command}`,
+    *       { system: "You are a security expert. Respond with 'ALLOW' or 'DENY: reason'" }
+    *     )
+    *     if (response.startsWith("DENY")) {
+    *       output.args = { command: `echo "Blocked: ${response}"` }
+    *     }
+    *   }
+    * }
+    * ```
+    *
+    * @security This hook is currently NOT triggered by the runtime.
+    * If implemented in the future, the output parameter should be treated as
+    * read-only for security-sensitive hooks (permission.ask, tool.execute.before).
+    */
+  "agent.executor"?: (
+    hookName: string,
+    input: any,
+    output: any,
+    llm: LLMClient,
+  ) => Promise<void>
+  /**
+   * Called when a file is changed in the workspace.
+   * This hook is triggered by the file watcher when files are created, modified, or deleted.
+   *
+   * @example
+   * ```typescript
+   * "file.changed": async (input, output) => {
+   *   console.log(`File ${input.path} was ${input.event}`);
+   *   // Perform actions like updating indexes, triggering builds, etc.
+   * }
+   * ```
+   */
+  "file.changed"?: (
+    input: {
+      path: string
+      event: "created" | "modified" | "deleted"
+      sessionID?: string
+    },
+    output: {},
+  ) => Promise<void>
+  /**
+   * Called when a session is about to stop.
+   * This hook is triggered when a session is ending, allowing plugins to perform cleanup,
+   * save state, or perform final processing.
+   *
+   * @example
+   * ```typescript
+   * "session.stop": async (input, output) => {
+   *   console.log(`Session ${input.sessionID} is stopping with reason: ${input.reason}`);
+   *   // Perform cleanup or save final state
+   * }
+   * ```
+   */
+  "session.stop"?: (
+    input: {
+      sessionID: string
+      reason: "completed" | "error" | "cancelled" | "context_overflow"
+      message?: string
+    },
+    output: {},
+  ) => Promise<void>
 }

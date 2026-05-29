@@ -14,6 +14,7 @@ import { lazy } from "@/util/lazy"
 import { Config } from "@/config/config"
 import { FileIgnore } from "./ignore"
 import { Protected } from "./protected"
+import { Plugin } from "@/plugin"
 import * as Log from "@opencode-ai/core/util/log"
 
 declare const OPENCODE_LIBC: string | undefined
@@ -69,6 +70,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const config = yield* Config.Service
     const git = yield* Git.Service
+    const plugin = yield* Plugin.Service
 
     const state = yield* InstanceState.make(
       Effect.fn("FileWatcher.state")(
@@ -95,12 +97,73 @@ export const layer = Layer.effect(
             Effect.promise(() => Promise.allSettled(subs.map((sub) => sub.unsubscribe()))),
           )
 
+          const DEBOUNCE_MS = 100
+          const recentTriggers = new Map<string, number>()
+
+          function shouldTrigger(filePath: string): boolean {
+            const now = Date.now()
+            const last = recentTriggers.get(filePath)
+            if (last && now - last < DEBOUNCE_MS) return false
+            recentTriggers.set(filePath, now)
+            if (recentTriggers.size > 1000) {
+              for (const [key, ts] of recentTriggers) {
+                if (now - ts > DEBOUNCE_MS * 10) recentTriggers.delete(key)
+              }
+            }
+            return true
+          }
+
           const cb: ParcelWatcher.SubscribeCallback = bridge.bind((err, evts) => {
             // if (err) return
             for (const evt of evts) {
-              if (evt.type === "create") void Bus.publish(ctx, Event.Updated, { file: evt.path, event: "add" })
-              if (evt.type === "update") void Bus.publish(ctx, Event.Updated, { file: evt.path, event: "change" })
-              if (evt.type === "delete") void Bus.publish(ctx, Event.Updated, { file: evt.path, event: "unlink" })
+              if (evt.type === "create") {
+                bridge.fork(
+                  Effect.promise(() => Bus.publish(ctx, Event.Updated, { file: evt.path, event: "add" })).pipe(
+                    Effect.catchCause((cause) => Effect.sync(() => log.warn("bus publish failed", { event: "add", path: evt.path, cause: Cause.pretty(cause) }))),
+                  ),
+                )
+                if (shouldTrigger(evt.path)) {
+                  bridge.fork(
+                    plugin.trigger("file.changed", { path: evt.path, event: "created" }, {}).pipe(
+                      Effect.catchCause((cause) => Effect.sync(() => {
+                        log.warn("plugin trigger failure", { event: "created", path: evt.path, cause: Cause.pretty(cause) })
+                      })),
+                    ),
+                  )
+                }
+              }
+              if (evt.type === "update") {
+                bridge.fork(
+                  Effect.promise(() => Bus.publish(ctx, Event.Updated, { file: evt.path, event: "change" })).pipe(
+                    Effect.catchCause((cause) => Effect.sync(() => log.warn("bus publish failed", { event: "change", path: evt.path, cause: Cause.pretty(cause) }))),
+                  ),
+                )
+                if (shouldTrigger(evt.path)) {
+                  bridge.fork(
+                    plugin.trigger("file.changed", { path: evt.path, event: "modified" }, {}).pipe(
+                      Effect.catchCause((cause) => Effect.sync(() => {
+                        log.warn("plugin trigger failure", { event: "modified", path: evt.path, cause: Cause.pretty(cause) })
+                      })),
+                    ),
+                  )
+                }
+              }
+              if (evt.type === "delete") {
+                bridge.fork(
+                  Effect.promise(() => Bus.publish(ctx, Event.Updated, { file: evt.path, event: "unlink" })).pipe(
+                    Effect.catchCause((cause) => Effect.sync(() => log.warn("bus publish failed", { event: "unlink", path: evt.path, cause: Cause.pretty(cause) }))),
+                  ),
+                )
+                if (shouldTrigger(evt.path)) {
+                  bridge.fork(
+                    plugin.trigger("file.changed", { path: evt.path, event: "deleted" }, {}).pipe(
+                      Effect.catchCause((cause) => Effect.sync(() => {
+                        log.warn("plugin trigger failure", { event: "deleted", path: evt.path, cause: Cause.pretty(cause) })
+                      })),
+                    ),
+                  )
+                }
+              }
             }
           })
 
@@ -162,6 +225,10 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(Config.defaultLayer), Layer.provide(Git.defaultLayer))
+export const defaultLayer = layer.pipe(
+  Layer.provide(Config.defaultLayer),
+  Layer.provide(Git.defaultLayer),
+  Layer.provide(Plugin.defaultLayer),
+)
 
 export * as FileWatcher from "./watcher"

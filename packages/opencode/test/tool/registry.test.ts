@@ -1,4 +1,4 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, test as bunTest } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
@@ -105,6 +105,12 @@ const background = testEffect(
 const withBrokenPlugin = testEffect(
   Layer.mergeAll(registryLayer({ plugin: brokenPluginLayer }), node, Agent.defaultLayer),
 )
+const exaRegistry = testEffect(
+  Layer.mergeAll(registryLayer({ flags: { enableExa: true } }), node, Agent.defaultLayer),
+)
+const lspToolRegistry = testEffect(
+  Layer.mergeAll(registryLayer({ flags: { experimentalLspTool: true } }), node, Agent.defaultLayer),
+)
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -121,13 +127,20 @@ describe("tool.registry", () => {
     }),
   )
 
-  scout.instance("shows repo research tools when experimental scout is enabled", () =>
+  scout.instance("defers repo research tools when experimental scout is enabled", () =>
     Effect.gen(function* () {
       const registry = yield* ToolRegistry.Service
       const ids = yield* registry.ids()
 
-      expect(ids).toContain("repo_clone")
-      expect(ids).toContain("repo_overview")
+      // Deferred tools are not in the active set by default
+      expect(ids).not.toContain("repo_clone")
+      expect(ids).not.toContain("repo_overview")
+
+      // But they are available in the deferred list
+      const deferred = yield* registry.deferred()
+      const deferredIds = deferred.map((t) => t.id)
+      expect(deferredIds).toContain("repo_clone")
+      expect(deferredIds).toContain("repo_overview")
     }),
   )
 
@@ -568,4 +581,311 @@ describe("tool.registry", () => {
       expect(ids).toContain("cowsay")
     }),
   )
+
+  it.instance("loads multiple named exports from a single custom tool file", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const tools = path.join(test.directory, ".opencode", "tools")
+      yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(tools, "multi.ts"),
+          [
+            "export const add = {",
+            "  description: 'add two numbers',",
+            "  args: { a: { type: 'number' }, b: { type: 'number' } },",
+            "  execute: async ({ a, b }) => String(a + b),",
+            "}",
+            "export const multiply = {",
+            "  description: 'multiply two numbers',",
+            "  args: { a: { type: 'number' }, b: { type: 'number' } },",
+            "  execute: async ({ a, b }) => String(a * b),",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      )
+
+      const registry = yield* ToolRegistry.Service
+      const ids = yield* registry.ids()
+      expect(ids).toContain("multi_add")
+      expect(ids).toContain("multi_multiply")
+    }),
+  )
+
+  it.instance("merges custom tools with builtin tools", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const tools = path.join(test.directory, ".opencode", "tools")
+      yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(tools, "custom.ts"),
+          [
+            "export default {",
+            "  description: 'custom tool',",
+            "  args: {},",
+            "  execute: async () => 'ok',",
+            "}",
+            "",
+          ].join("\n"),
+        ),
+      )
+
+      const registry = yield* ToolRegistry.Service
+      const all = yield* registry.all()
+      const ids = all.map((t) => t.id)
+
+      // Builtin tools present
+      expect(ids).toContain("read")
+      expect(ids).toContain("bash")
+      expect(ids).toContain("edit")
+
+      // Custom tool present
+      expect(ids).toContain("custom")
+    }),
+  )
+
+  describe("tools() model filtering", () => {
+    it.instance("includes edit/write and excludes apply_patch for non-GPT models", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.anthropic,
+          modelID: ModelID.make("claude-sonnet-4-20250514"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).toContain("edit")
+        expect(ids).toContain("write")
+        expect(ids).not.toContain("apply_patch")
+      }),
+    )
+
+    it.instance("includes apply_patch and excludes edit/write for GPT models", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.openai,
+          modelID: ModelID.make("gpt-5"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).toContain("apply_patch")
+        expect(ids).not.toContain("edit")
+        expect(ids).not.toContain("write")
+      }),
+    )
+
+    it.instance("includes edit/write for gpt-4 models (excluded from patch)", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.openai,
+          modelID: ModelID.make("gpt-4-turbo"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).toContain("edit")
+        expect(ids).toContain("write")
+        expect(ids).not.toContain("apply_patch")
+      }),
+    )
+
+    it.instance("includes edit/write for GPT oss models (excluded from patch)", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.openai,
+          modelID: ModelID.make("gpt-oss-120b"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).toContain("edit")
+        expect(ids).toContain("write")
+        expect(ids).not.toContain("apply_patch")
+      }),
+    )
+
+    it.instance("includes websearch for opencode provider", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("test"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).toContain("websearch")
+      }),
+    )
+
+    it.instance("excludes websearch for non-opencode provider without flags", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.anthropic,
+          modelID: ModelID.make("claude-sonnet-4-20250514"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).not.toContain("websearch")
+      }),
+    )
+
+    exaRegistry.instance("includes websearch for non-opencode provider when exa is enabled", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.anthropic,
+          modelID: ModelID.make("claude-sonnet-4-20250514"),
+          agent: build,
+        })
+        const ids = tools.map((t) => t.id)
+
+        expect(ids).toContain("websearch")
+      }),
+    )
+  })
+
+  describe("named()", () => {
+    it.instance("returns task and read tool definitions", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const named = yield* registry.named()
+
+        expect(named.task).toBeDefined()
+        expect(named.task.id).toBe("task")
+        expect(named.read).toBeDefined()
+        expect(named.read.id).toBe("read")
+      }),
+    )
+
+    it.instance("named tools have execute functions", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const named = yield* registry.named()
+
+        expect(typeof named.task.execute).toBe("function")
+        expect(typeof named.read.execute).toBe("function")
+      }),
+    )
+
+    it.instance("named tools have descriptions and parameters", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const named = yield* registry.named()
+
+        expect(named.task.description.length).toBeGreaterThan(0)
+        expect(named.task.parameters).toBeDefined()
+        expect(named.read.description.length).toBeGreaterThan(0)
+        expect(named.read.parameters).toBeDefined()
+      }),
+    )
+  })
+
+  describe("tools() descriptions", () => {
+    it.instance("enriches task tool description with agent information", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("test"),
+          agent: build,
+        })
+        const taskTool = tools.find((t) => t.id === "task")
+
+        expect(taskTool).toBeDefined()
+        expect(taskTool!.description).toContain("Available agent types")
+      }),
+    )
+
+    it.instance("enriches skill tool description with skill information", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("test"),
+          agent: build,
+        })
+        const skillTool = tools.find((t) => t.id === "skill")
+
+        expect(skillTool).toBeDefined()
+        expect(skillTool!.description.length).toBeGreaterThan(0)
+      }),
+    )
+
+    it.instance("returns tools with execute functions and formatValidationError", () =>
+      Effect.gen(function* () {
+        const registry = yield* ToolRegistry.Service
+        const agent = yield* Agent.Service
+        const build = yield* agent.get("build")
+        if (!build) throw new Error("build agent not found")
+        const tools = yield* registry.tools({
+          providerID: ProviderID.opencode,
+          modelID: ModelID.make("test"),
+          agent: build,
+        })
+
+        for (const tool of tools) {
+          expect(typeof tool.execute).toBe("function")
+          expect(tool.id.length).toBeGreaterThan(0)
+          expect(tool.description.length).toBeGreaterThan(0)
+          expect(tool.parameters).toBeDefined()
+        }
+      }),
+    )
+  })
+
+  describe("webSearchEnabled", () => {
+    bunTest("returns true for opencode provider", () => {
+      expect(ToolRegistry.webSearchEnabled(ProviderID.opencode)).toBe(true)
+    })
+
+    bunTest("returns false for non-opencode provider without flags", () => {
+      expect(ToolRegistry.webSearchEnabled(ProviderID.anthropic)).toBe(false)
+      expect(ToolRegistry.webSearchEnabled(ProviderID.openai)).toBe(false)
+    })
+
+    bunTest("returns true when exa flag is set", () => {
+      expect(ToolRegistry.webSearchEnabled(ProviderID.anthropic, { exa: true, parallel: false })).toBe(true)
+    })
+
+    bunTest("returns true when parallel flag is set", () => {
+      expect(ToolRegistry.webSearchEnabled(ProviderID.anthropic, { exa: false, parallel: true })).toBe(true)
+    })
+  })
 })

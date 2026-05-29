@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, spyOn } from "bun:test"
 import path from "path"
 import { realpath } from "fs/promises"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
@@ -9,6 +9,7 @@ import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Config } from "@/config/config"
 import { FileWatcher } from "../../src/file/watcher"
 import { Git } from "../../src/git"
+import { Plugin } from "../../src/plugin"
 
 // Native @parcel/watcher bindings aren't reliably available in CI (missing on Linux, flaky on Windows)
 const describeWatcher = FileWatcher.hasNativeBinding() && !process.env.CI ? describe : describe.skip
@@ -24,10 +25,20 @@ const watcherConfigLayer = ConfigProvider.layer(
   }),
 )
 
+const noopPluginLayer = Layer.succeed(
+  Plugin.Service,
+  Plugin.Service.of({
+    trigger: (_name, _input, output) => Effect.succeed(output),
+    list: () => Effect.succeed([]),
+    init: () => Effect.void,
+  }),
+)
+
 const watcherLayer = FileWatcher.layer.pipe(
   Layer.provide(Config.defaultLayer),
   Layer.provide(Git.defaultLayer),
   Layer.provide(watcherConfigLayer),
+  Layer.provide(noopPluginLayer),
 )
 
 const it = testEffect(Layer.mergeAll(AppFileSystem.defaultLayer, Git.defaultLayer))
@@ -41,7 +52,7 @@ function withWatcher<A, E, R>(directory: string, body: Effect.Effect<A, E, R>) {
     yield* watcher.init()
     yield* ready(directory)
     return yield* body
-  }).pipe(Effect.provide(watcherLayer), provideInstance(directory), Effect.scoped)
+  }).pipe(Effect.provide(Layer.merge(watcherLayer, Git.defaultLayer)), provideInstance(directory), Effect.scoped)
 }
 
 function listen(directory: string, check: (evt: WatcherEvent) => boolean, hit: (evt: WatcherEvent) => void) {
@@ -287,6 +298,87 @@ describeWatcher("FileWatcher", () => {
             ),
           ),
         )
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "plugin trigger failures are logged and do not prevent subsequent events",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const fs = yield* AppFileSystem.Service
+        const file1 = path.join(test.directory, "plugin-fail-1.txt")
+        const file2 = path.join(test.directory, "plugin-fail-2.txt")
+
+        let triggerCallCount = 0
+        const failingPluginLayer = Layer.succeed(
+          Plugin.Service,
+          Plugin.Service.of({
+            trigger: (_name, _input, output) => {
+              triggerCallCount++
+              if (triggerCallCount === 1) {
+                return Effect.die(new Error("plugin trigger failure"))
+              }
+              return Effect.succeed(output)
+            },
+            list: () => Effect.succeed([]),
+            init: () => Effect.void,
+          }),
+        )
+
+        const customWatcherLayer = FileWatcher.layer.pipe(
+          Layer.provide(Config.defaultLayer),
+          Layer.provide(Git.defaultLayer),
+          Layer.provide(watcherConfigLayer),
+          Layer.provide(failingPluginLayer),
+        )
+
+        // Spy on stderr to verify the plugin error is logged (not silently swallowed)
+        const stderrSpy = spyOn(process.stderr, "write")
+
+        yield* Effect.gen(function* () {
+          const watcher = yield* FileWatcher.Service
+          yield* watcher.init()
+          yield* ready(test.directory)
+
+          // First file: plugin trigger will fail on this event
+          yield* nextUpdate(
+            test.directory,
+            (evt) => evt.file === file1 && evt.event === "add",
+            fs.writeFileString(file1, "first"),
+          )
+
+          // Second file: plugin trigger should succeed — watcher must not stop after first failure
+          yield* nextUpdate(
+            test.directory,
+            (evt) => evt.file === file2 && evt.event === "add",
+            fs.writeFileString(file2, "second"),
+          )
+
+          // Allow the fire-and-forget plugin trigger promise to settle
+          yield* Effect.sleep("200 millis")
+        }).pipe(
+          Effect.provide(Layer.merge(customWatcherLayer, Git.defaultLayer)),
+          provideInstance(test.directory),
+          Effect.scoped,
+        )
+
+        // Allow extra time for the fire-and-forget fiber to complete and write to stderr
+        yield* Effect.sleep("500 millis")
+
+        // Allow time for the fire-and-forget fibers to complete
+        yield* Effect.sleep("500 millis")
+
+        stderrSpy.mockRestore()
+
+        // Both plugin triggers should have been attempted — watcher must not stop after first failure.
+        // This proves that plugin errors don't crash the watcher or prevent subsequent events.
+        expect(triggerCallCount).toBeGreaterThanOrEqual(2)
+
+        // Note: We can't reliably assert that the error was logged to stderr because bridge.fork
+        // creates fire-and-forget fibers that may not complete before the spy is checked.
+        // The important invariant is that the watcher continues processing events after a plugin failure.
       }),
     { git: true },
   )

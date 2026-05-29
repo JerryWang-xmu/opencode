@@ -3810,3 +3810,2192 @@ describe("ProviderTransform.providerOptions - ai-gateway-provider", () => {
     expect(result).toEqual({ openaiCompatible: { reasoningEffort: "high" } })
   })
 })
+
+// ─── sanitizeSurrogates ───────────────────────────────────────────────────────
+
+describe("ProviderTransform.sanitizeSurrogates", () => {
+  test("replaces lone high surrogate with replacement character", () => {
+    expect(ProviderTransform.sanitizeSurrogates("\uD83D")).toBe("\uFFFD")
+  })
+
+  test("replaces lone low surrogate with replacement character", () => {
+    expect(ProviderTransform.sanitizeSurrogates("\uDC00")).toBe("\uFFFD")
+  })
+
+  test("preserves valid surrogate pairs (emoji)", () => {
+    expect(ProviderTransform.sanitizeSurrogates("🚀")).toBe("🚀")
+  })
+
+  test("replaces lone high surrogate in mixed string", () => {
+    expect(ProviderTransform.sanitizeSurrogates("hello\uD83Dworld")).toBe("hello\uFFFDworld")
+  })
+
+  test("replaces lone low surrogate in mixed string", () => {
+    expect(ProviderTransform.sanitizeSurrogates("abc\uDC00def")).toBe("abc\uFFFDdef")
+  })
+
+  test("preserves empty string", () => {
+    expect(ProviderTransform.sanitizeSurrogates("")).toBe("")
+  })
+
+  test("preserves ASCII-only string", () => {
+    expect(ProviderTransform.sanitizeSurrogates("hello world")).toBe("hello world")
+  })
+
+  test("handles two lone high surrogates", () => {
+    // \uD800 and \uD801 are both lone high surrogates (no matching low surrogate follows)
+    expect(ProviderTransform.sanitizeSurrogates("\uD800\uD801")).toBe("\uFFFD\uFFFD")
+  })
+
+  test("preserves valid pair adjacent to lone surrogate", () => {
+    // \uD800 is lone high, \uD83D\uDE00 is valid pair (😀)
+    expect(ProviderTransform.sanitizeSurrogates("\uD800\uD83D\uDE00")).toBe("\uFFFD😀")
+  })
+})
+
+// ─── temperature ───────────────────────────────────────────────────────────────
+
+describe("ProviderTransform.temperature", () => {
+  const createModel = (id: string) => ({ id } as any)
+
+  test("returns 0.55 for qwen models", () => {
+    expect(ProviderTransform.temperature(createModel("qwen-plus"))).toBe(0.55)
+  })
+
+  test("returns undefined for claude models", () => {
+    expect(ProviderTransform.temperature(createModel("claude-3-5-sonnet"))).toBeUndefined()
+  })
+
+  test("returns 1.0 for gemini models", () => {
+    expect(ProviderTransform.temperature(createModel("gemini-2.5-pro"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for glm-4.6 models", () => {
+    expect(ProviderTransform.temperature(createModel("glm-4.6"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for glm-4.7 models", () => {
+    expect(ProviderTransform.temperature(createModel("glm-4.7"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for minimax-m2 models", () => {
+    expect(ProviderTransform.temperature(createModel("minimax-m2"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2 thinking models", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2-thinking"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2.5 models", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2.5"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2p5 models", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2p5"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2-5 models", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2-5"))).toBe(1.0)
+  })
+
+  test("returns 0.6 for kimi-k2 base models", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2"))).toBe(0.6)
+  })
+
+  test("returns undefined for unknown models", () => {
+    expect(ProviderTransform.temperature(createModel("gpt-4"))).toBeUndefined()
+  })
+})
+
+// ─── topP ──────────────────────────────────────────────────────────────────────
+
+describe("ProviderTransform.topP", () => {
+  const createModel = (id: string) => ({ id } as any)
+
+  test("returns 1 for qwen models", () => {
+    expect(ProviderTransform.topP(createModel("qwen-plus"))).toBe(1)
+  })
+
+  test("returns 0.95 for minimax-m2 models", () => {
+    expect(ProviderTransform.topP(createModel("minimax-m2"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for gemini models", () => {
+    expect(ProviderTransform.topP(createModel("gemini-2.5-pro"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2.5 models", () => {
+    expect(ProviderTransform.topP(createModel("kimi-k2.5"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2p5 models", () => {
+    expect(ProviderTransform.topP(createModel("kimi-k2p5"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2-5 models", () => {
+    expect(ProviderTransform.topP(createModel("kimi-k2-5"))).toBe(0.95)
+  })
+
+  test("returns undefined for unknown models", () => {
+    expect(ProviderTransform.topP(createModel("gpt-4"))).toBeUndefined()
+  })
+})
+
+// ─── topK ──────────────────────────────────────────────────────────────────────
+
+describe("ProviderTransform.topK", () => {
+  const createModel = (id: string) => ({ id } as any)
+
+  test("returns 40 for minimax-m2.5 models", () => {
+    expect(ProviderTransform.topK(createModel("minimax-m2.5"))).toBe(40)
+  })
+
+  test("returns 40 for minimax-m25 models", () => {
+    expect(ProviderTransform.topK(createModel("minimax-m25"))).toBe(40)
+  })
+
+  test("returns 40 for minimax-m21 models", () => {
+    expect(ProviderTransform.topK(createModel("minimax-m21"))).toBe(40)
+  })
+
+  test("returns 20 for minimax-m2 base models", () => {
+    expect(ProviderTransform.topK(createModel("minimax-m2"))).toBe(20)
+  })
+
+  test("returns 64 for gemini models", () => {
+    expect(ProviderTransform.topK(createModel("gemini-2.5-pro"))).toBe(64)
+  })
+
+  test("returns undefined for unknown models", () => {
+    expect(ProviderTransform.topK(createModel("gpt-4"))).toBeUndefined()
+  })
+})
+
+// ─── maxOutputTokens ───────────────────────────────────────────────────────────
+
+describe("ProviderTransform.maxOutputTokens", () => {
+  test("returns model limit output when less than OUTPUT_TOKEN_MAX", () => {
+    const model = { limit: { output: 4096 } } as any
+    expect(ProviderTransform.maxOutputTokens(model)).toBe(4096)
+  })
+
+  test("returns OUTPUT_TOKEN_MAX when model limit output exceeds it", () => {
+    const model = { limit: { output: 100_000 } } as any
+    expect(ProviderTransform.maxOutputTokens(model)).toBe(32_000)
+  })
+
+  test("returns OUTPUT_TOKEN_MAX when model limit output is 0", () => {
+    const model = { limit: { output: 0 } } as any
+    expect(ProviderTransform.maxOutputTokens(model)).toBe(32_000)
+  })
+
+  test("allows custom outputTokenMax override", () => {
+    const model = { limit: { output: 4096 } } as any
+    expect(ProviderTransform.maxOutputTokens(model, 2048)).toBe(2048)
+  })
+
+  test("returns model limit when custom max is larger than model output", () => {
+    const model = { limit: { output: 4096 } } as any
+    expect(ProviderTransform.maxOutputTokens(model, 100_000)).toBe(4096)
+  })
+})
+
+// ─── unsupported modality parts ────────────────────────────────────────────────
+
+describe("ProviderTransform.message - unsupported modality replacement", () => {
+  const createModel = (inputCapabilities: Record<string, boolean>) =>
+    ({
+      id: "test/test-model",
+      providerID: "test",
+      api: {
+        id: "test-model",
+        url: "https://api.test.com",
+        npm: "@ai-sdk/openai-compatible",
+      },
+      name: "Test Model",
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: true,
+        toolcall: true,
+        input: { text: true, audio: false, image: false, video: false, pdf: false, ...inputCapabilities },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: false,
+      },
+      cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+      limit: { context: 128000, output: 8192 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("replaces unsupported image with error text", () => {
+    const model = createModel({ image: false })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Look at this" },
+          { type: "image", image: "data:image/png;base64,abc" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[1]).toEqual({
+      type: "text",
+      text: "ERROR: Cannot read image (this model does not support image input). Inform the user.",
+    })
+  })
+
+  test("replaces unsupported PDF file with error text including filename", () => {
+    const model = createModel({ pdf: false })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "file", mediaType: "application/pdf", filename: "report.pdf", data: "base64data" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[0]).toEqual({
+      type: "text",
+      text: 'ERROR: Cannot read "report.pdf" (this model does not support pdf input). Inform the user.',
+    })
+  })
+
+  test("replaces unsupported audio with error text", () => {
+    const model = createModel({ audio: false })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "file", mediaType: "audio/mp3", filename: "song.mp3", data: "base64data" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[0]).toEqual({
+      type: "text",
+      text: 'ERROR: Cannot read "song.mp3" (this model does not support audio input). Inform the user.',
+    })
+  })
+
+  test("replaces unsupported video with error text", () => {
+    const model = createModel({ video: false })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "file", mediaType: "video/mp4", filename: "clip.mp4", data: "base64data" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[0]).toEqual({
+      type: "text",
+      text: 'ERROR: Cannot read "clip.mp4" (this model does not support video input). Inform the user.',
+    })
+  })
+
+  test("keeps supported image unchanged", () => {
+    const model = createModel({ image: true })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "image", image: "data:image/png;base64,abc" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[0]).toEqual({ type: "image", image: "data:image/png;base64,abc" })
+  })
+
+  test("keeps supported PDF file unchanged", () => {
+    const model = createModel({ pdf: true })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "file", mediaType: "application/pdf", filename: "report.pdf", data: "base64data" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[0]).toEqual({
+      type: "file",
+      mediaType: "application/pdf",
+      filename: "report.pdf",
+      data: "base64data",
+    })
+  })
+
+  test("does not modify non-user messages", () => {
+    const model = createModel({ image: false })
+    const msgs = [
+      { role: "assistant", content: "Response" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content).toBe("Response")
+  })
+
+  test("replaces unsupported image without filename using modality name", () => {
+    const model = createModel({ image: false })
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "image", image: "data:image/png;base64,abc" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content[0]).toEqual({
+      type: "text",
+      text: "ERROR: Cannot read image (this model does not support image input). Inform the user.",
+    })
+  })
+})
+
+// ─── mistral tool call ID scrubbing ────────────────────────────────────────────
+
+describe("ProviderTransform.message - mistral tool call ID scrubbing", () => {
+  const mistralModel = {
+    id: "mistral/mistral-small-latest",
+    providerID: "mistral",
+    api: {
+      id: "mistral-small-latest",
+      url: "https://api.mistral.com",
+      npm: "@ai-sdk/mistral",
+    },
+    name: "Mistral Small",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("scrubs tool call IDs to alphanumeric max 9 chars padded with zeros", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call_abc-123!def", toolName: "bash", input: { command: "ls" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {})
+    // "call_abc-123!def" → remove non-alphanumeric → "callabc123def" → first 9 chars → "callabc12" → pad to 9 → "callabc120"
+    // Wait, let me re-check: remove non-alphanumeric = "callabc123def", first 9 = "callabc12", padEnd(9, "0") = "callabc120"
+    // Actually: "callabc123def" has 13 chars, first 9 = "callabc12" (8 chars), padEnd(9, "0") = "callabc120"
+    // Hmm, "callabc123def" → remove non-alphanumeric → "callabc123def" → substring(0,9) → "callabc12" (9 chars) → padEnd(9, "0") → "callabc12"
+    // Wait: "call_abc-123!def" → replace non-alphanumeric → "callabc123def" → substring(0,9) → "callabc123" (9 chars) → padEnd(9, "0") → "callabc123"
+    // Let me just check what the actual result is
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "callabc12" })
+  })
+
+  test("pads short tool call IDs with zeros", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "ab", toolName: "bash", input: { command: "ls" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {})
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "ab0000000" })
+  })
+
+  test("scrubs tool result IDs in tool messages", () => {
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "call_abc-123!def", toolName: "bash", output: { type: "text", value: "ok" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {})
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "callabc12" })
+  })
+
+  test("inserts assistant message between tool and user messages", () => {
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "abc", toolName: "bash", output: { type: "text", value: "ok" } },
+        ],
+      },
+      { role: "user", content: "Next question" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {})
+    // tool + inserted assistant + user = 3 messages
+    expect(result).toHaveLength(3)
+    expect(result[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "Done." }],
+    })
+  })
+
+  test("does not insert assistant when tool is not followed by user", () => {
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "abc", toolName: "bash", output: { type: "text", value: "ok" } },
+        ],
+      },
+      { role: "assistant", content: "Response" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {})
+    expect(result).toHaveLength(2)
+  })
+
+  test("scrubs IDs for devstral models too", () => {
+    const devstralModel = {
+      ...mistralModel,
+      api: { id: "devstral-small-latest", npm: "@ai-sdk/openai-compatible" },
+    }
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call_abc-123!def", toolName: "bash", input: { command: "ls" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, devstralModel, {})
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "callabc12" })
+  })
+})
+
+// ─── claude tool call ID scrubbing ─────────────────────────────────────────────
+
+describe("ProviderTransform.message - claude tool call ID scrubbing", () => {
+  const claudeModel = {
+    id: "anthropic/claude-3-5-sonnet",
+    providerID: "anthropic",
+    api: {
+      id: "claude-3-5-sonnet-20241022",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude 3.5 Sonnet",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("scrubs tool call IDs to alphanumeric + underscore + hyphen only", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call.abc@123#def", toolName: "bash", input: { command: "ls" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, claudeModel, {})
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "call_abc_123_def" })
+  })
+
+  test("scrubs tool result IDs in tool messages for claude", () => {
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "call.abc@123", toolName: "bash", output: { type: "text", value: "ok" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, claudeModel, {})
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "call_abc_123" })
+  })
+
+  test("does not scrub IDs for non-claude models", () => {
+    const openaiModel = {
+      ...claudeModel,
+      providerID: "openai",
+      api: { id: "gpt-4", npm: "@ai-sdk/openai" },
+    }
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call.abc@123", toolName: "bash", input: { command: "ls" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, openaiModel, {})
+    expect(result[0].content[0]).toMatchObject({ toolCallId: "call.abc@123" })
+  })
+})
+
+// ─── deepseek reasoning requirement ────────────────────────────────────────────
+
+describe("ProviderTransform.message - deepseek reasoning requirement", () => {
+  const deepseekModel = {
+    id: "deepseek/deepseek-chat",
+    providerID: "deepseek",
+    api: {
+      id: "deepseek-chat",
+      url: "https://api.deepseek.com",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    name: "DeepSeek Chat",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: false,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("adds empty reasoning part to assistant messages without reasoning", () => {
+    const msgs = [
+      { role: "assistant", content: "Hello" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {})
+    expect(result[0].content).toEqual([
+      { type: "text", text: "Hello" },
+      { type: "reasoning", text: "" },
+    ])
+  })
+
+  test("adds empty reasoning part to assistant array content without reasoning", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Hello" }],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {})
+    expect(result[0].content).toEqual([
+      { type: "text", text: "Hello" },
+      { type: "reasoning", text: "" },
+    ])
+  })
+
+  test("does not add reasoning when already present", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Thinking..." },
+          { type: "text", text: "Hello" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {})
+    expect(result[0].content).toEqual([
+      { type: "reasoning", text: "Thinking..." },
+      { type: "text", text: "Hello" },
+    ])
+  })
+
+  test("does not modify non-assistant messages", () => {
+    const msgs = [
+      { role: "user", content: "Question" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {})
+    expect(result[0].content).toBe("Question")
+  })
+})
+
+// ─── anthropic reasoning with signature/redactedData ───────────────────────────
+
+describe("ProviderTransform.message - anthropic reasoning signature preservation", () => {
+  const anthropicModel = {
+    id: "anthropic/claude-3-5-sonnet",
+    providerID: "anthropic",
+    api: {
+      id: "claude-3-5-sonnet-20241022",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude 3.5 Sonnet",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("keeps reasoning part with empty text but signature in providerOptions", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "reasoning",
+            text: "",
+            providerOptions: {
+              anthropic: { signature: "sig_value" },
+            },
+          },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {})
+    // Empty text reasoning would normally be filtered, but signature preserves it
+    expect(result).toHaveLength(1)
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0]).toEqual({
+      type: "reasoning",
+      text: "",
+      providerOptions: { anthropic: { signature: "sig_value" } },
+    })
+  })
+
+  test("keeps reasoning part with empty text but redactedData in providerOptions", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "reasoning",
+            text: "",
+            providerOptions: {
+              anthropic: { redactedData: "redacted_value" },
+            },
+          },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {})
+    expect(result).toHaveLength(1)
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0]).toEqual({
+      type: "reasoning",
+      text: "",
+      providerOptions: { anthropic: { redactedData: "redacted_value" } },
+    })
+  })
+
+  test("filters reasoning with empty text and no signature/redactedData", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "" },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {})
+    expect(result[0].content).toHaveLength(1)
+    expect(result[0].content[0]).toEqual({ type: "text", text: "Answer" })
+  })
+})
+
+// ─── options - additional provider-specific ────────────────────────────────────
+
+describe("ProviderTransform.options - anthropic toolStreaming", () => {
+  test("sets toolStreaming=false for anthropic non-claude models", () => {
+    const model = {
+      id: "anthropic/other-model",
+      providerID: "anthropic",
+      api: { id: "other-model", npm: "@ai-sdk/anthropic" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.toolStreaming).toBe(false)
+  })
+
+  test("sets toolStreaming=false for google-vertex/anthropic", () => {
+    const model = {
+      id: "google-vertex-anthropic/claude-sonnet-4",
+      providerID: "google-vertex-anthropic",
+      api: { id: "claude-sonnet-4", npm: "@ai-sdk/google-vertex/anthropic" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.toolStreaming).toBe(false)
+  })
+
+  test("does not set toolStreaming for claude models on anthropic npm", () => {
+    const model = {
+      id: "anthropic/claude-3-5-sonnet",
+      providerID: "anthropic",
+      api: { id: "claude-3-5-sonnet", npm: "@ai-sdk/anthropic" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.toolStreaming).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.options - baseten/opencode chat_template_args", () => {
+  test("sets chat_template_args for baseten provider", () => {
+    const model = {
+      id: "baseten/test-model",
+      providerID: "baseten",
+      api: { id: "test-model", npm: "@ai-sdk/openai-compatible" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.chat_template_args).toEqual({ enable_thinking: true })
+  })
+
+  test("sets chat_template_args for opencode kimi-k2-thinking", () => {
+    const model = {
+      id: "opencode/kimi-k2-thinking",
+      providerID: "opencode",
+      api: { id: "kimi-k2-thinking", npm: "@ai-sdk/openai-compatible" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.chat_template_args).toEqual({ enable_thinking: true })
+  })
+
+  test("sets chat_template_args for opencode glm-4.6", () => {
+    const model = {
+      id: "opencode/glm-4.6",
+      providerID: "opencode",
+      api: { id: "glm-4.6", npm: "@ai-sdk/openai-compatible" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.chat_template_args).toEqual({ enable_thinking: true })
+  })
+
+  test("does not set chat_template_args for other opencode models", () => {
+    const model = {
+      id: "opencode/other-model",
+      providerID: "opencode",
+      api: { id: "other-model", npm: "@ai-sdk/openai-compatible" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.chat_template_args).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.options - alibaba-cn enable_thinking", () => {
+  test("sets enable_thinking for alibaba-cn reasoning models on openai-compatible", () => {
+    const model = {
+      id: "alibaba-cn/qwen3",
+      providerID: "alibaba-cn",
+      api: { id: "qwen3", npm: "@ai-sdk/openai-compatible" },
+      capabilities: { reasoning: true },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.enable_thinking).toBe(true)
+  })
+
+  test("does not set enable_thinking for kimi-k2-thinking on alibaba-cn", () => {
+    const model = {
+      id: "alibaba-cn/kimi-k2-thinking",
+      providerID: "alibaba-cn",
+      api: { id: "kimi-k2-thinking", npm: "@ai-sdk/openai-compatible" },
+      capabilities: { reasoning: true },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.enable_thinking).toBeUndefined()
+  })
+
+  test("does not set enable_thinking for non-reasoning models", () => {
+    const model = {
+      id: "alibaba-cn/qwen-turbo",
+      providerID: "alibaba-cn",
+      api: { id: "qwen-turbo", npm: "@ai-sdk/openai-compatible" },
+      capabilities: { reasoning: false },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.enable_thinking).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.options - venice/openrouter/llmgateway", () => {
+  test("sets promptCacheKey for venice provider", () => {
+    const model = {
+      id: "venice/test-model",
+      providerID: "venice",
+      api: { id: "test-model", npm: "@ai-sdk/openai-compatible" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "session-1", providerOptions: {} })
+    expect(result.promptCacheKey).toBe("session-1")
+  })
+
+  test("sets prompt_cache_key for openrouter provider", () => {
+    const model = {
+      id: "openrouter/test-model",
+      providerID: "openrouter",
+      api: { id: "test-model", npm: "@openrouter/ai-sdk-provider" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "session-1", providerOptions: {} })
+    expect(result.prompt_cache_key).toBe("session-1")
+  })
+
+  test("sets usage and gemini-3 reasoning for openrouter", () => {
+    const model = {
+      id: "openrouter/gemini-3-pro",
+      providerID: "openrouter",
+      api: { id: "gemini-3-pro", npm: "@openrouter/ai-sdk-provider" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "session-1", providerOptions: {} })
+    expect(result.usage).toEqual({ include: true })
+    expect(result.reasoning).toEqual({ effort: "high" })
+  })
+
+  test("sets usage for llmgateway provider", () => {
+    const model = {
+      id: "llmgateway/test-model",
+      providerID: "llmgateway",
+      api: { id: "test-model", npm: "@llmgateway/ai-sdk-provider" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "session-1", providerOptions: {} })
+    expect(result.usage).toEqual({ include: true })
+  })
+
+  test("sets gateway caching for @ai-sdk/gateway", () => {
+    const model = {
+      id: "vercel/test-model",
+      providerID: "vercel",
+      api: { id: "test-model", npm: "@ai-sdk/gateway" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "session-1", providerOptions: {} })
+    expect(result.gateway).toEqual({ caching: "auto" })
+  })
+})
+
+describe("ProviderTransform.options - azure gpt-5.5 reasoningSummary", () => {
+  test("sets reasoningSummary for azure gpt-5.5 models", () => {
+    const model = {
+      id: "azure/gpt-5.5",
+      providerID: "azure",
+      api: { id: "gpt-5.5", npm: "@ai-sdk/azure" },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.reasoningSummary).toBe("auto")
+  })
+})
+
+describe("ProviderTransform.options - kimi anthropic thinking", () => {
+  test("sets thinking for kimi-k2.5 on anthropic npm", () => {
+    const model = {
+      id: "anthropic/kimi-k2.5",
+      providerID: "opencode",
+      api: { id: "kimi-k2.5", npm: "@ai-sdk/anthropic" },
+      capabilities: { reasoning: true },
+      limit: { output: 32000 },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.thinking).toEqual({
+      type: "enabled",
+      budgetTokens: Math.min(16_000, Math.floor(32000 / 2 - 1)),
+    })
+  })
+
+  test("sets thinking for kimi-k2p on google-vertex/anthropic npm", () => {
+    const model = {
+      id: "google-vertex-anthropic/kimi-k2p",
+      providerID: "google-vertex-anthropic",
+      api: { id: "kimi-k2p", npm: "@ai-sdk/google-vertex/anthropic" },
+      capabilities: { reasoning: true },
+      limit: { output: 32000 },
+    } as any
+    const result = ProviderTransform.options({ model, sessionID: "test", providerOptions: {} })
+    expect(result.thinking).toBeDefined()
+    expect(result.thinking.type).toBe("enabled")
+  })
+})
+
+// ─── smallOptions - additional coverage ────────────────────────────────────────
+
+describe("ProviderTransform.smallOptions - openrouter/google reasoning disabled", () => {
+  test("returns reasoning disabled for openrouter google models without variants", () => {
+    const model = {
+      id: "openrouter/google/gemini-2.0-flash",
+      providerID: "openrouter",
+      api: { id: "google/gemini-2.0-flash", npm: "@openrouter/ai-sdk-provider" },
+      variants: {},
+    } as any
+    const result = ProviderTransform.smallOptions(model)
+    expect(result).toEqual({ reasoning: { enabled: false } })
+  })
+
+  test("returns first variant for openrouter google models with variants", () => {
+    const model = {
+      id: "openrouter/google/gemini-2.5-pro",
+      providerID: "openrouter",
+      api: { id: "google/gemini-2.5-pro", npm: "@openrouter/ai-sdk-provider" },
+      variants: {
+        high: { thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } },
+      },
+    } as any
+    const result = ProviderTransform.smallOptions(model)
+    expect(result).toEqual({ thinkingConfig: { includeThoughts: true, thinkingBudget: 16000 } })
+  })
+})
+
+describe("ProviderTransform.smallOptions - venice disableThinking", () => {
+  test("returns disableThinking when no variants", () => {
+    const model = {
+      id: "venice/test-model",
+      providerID: "venice",
+      api: { id: "test-model", npm: "@ai-sdk/openai-compatible" },
+      variants: {},
+    } as any
+    const result = ProviderTransform.smallOptions(model)
+    expect(result).toEqual({ veniceParameters: { disableThinking: true } })
+  })
+
+  test("returns first variant when variants exist", () => {
+    const model = {
+      id: "venice/test-model",
+      providerID: "venice",
+      api: { id: "test-model", npm: "@ai-sdk/openai-compatible" },
+      variants: {
+        low: { reasoningEffort: "low" },
+      },
+    } as any
+    const result = ProviderTransform.smallOptions(model)
+    expect(result).toEqual({ reasoningEffort: "low" })
+  })
+})
+
+// ─── schema - gemini integer enum conversion ───────────────────────────────────
+
+describe("ProviderTransform.schema - gemini integer enum to string", () => {
+  const geminiModel = {
+    providerID: "google",
+    api: { id: "gemini-3-pro" },
+  } as any
+
+  test("converts integer enum values to strings", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        priority: {
+          type: "integer",
+          enum: [1, 2, 3],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+    expect(result.properties.priority.type).toBe("string")
+    expect(result.properties.priority.enum).toEqual(["1", "2", "3"])
+  })
+
+  test("converts number enum values to strings", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        level: {
+          type: "number",
+          enum: [0.5, 1.0, 2.5],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+    expect(result.properties.level.type).toBe("string")
+    expect(result.properties.level.enum).toEqual(["0.5", "1", "2.5"])
+  })
+
+  test("preserves string enums unchanged", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["active", "inactive"],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+    expect(result.properties.status.type).toBe("string")
+    expect(result.properties.status.enum).toEqual(["active", "inactive"])
+  })
+})
+
+describe("ProviderTransform.schema - gemini required filtering", () => {
+  const geminiModel = {
+    providerID: "google",
+    api: { id: "gemini-3-pro" },
+  } as any
+
+  test("filters required array to only include fields in properties", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+      required: ["name", "missing_field"],
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+    expect(result.required).toEqual(["name"])
+  })
+})
+
+// ─── message - empty messages array ────────────────────────────────────────────
+
+describe("ProviderTransform.message - empty messages array", () => {
+  const model = {
+    id: "test/test-model",
+    providerID: "test",
+    api: { id: "test-model", npm: "@ai-sdk/openai-compatible" },
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("handles empty messages array", () => {
+    const result = ProviderTransform.message([], model, {})
+    expect(result).toEqual([])
+  })
+})
+
+// ─── message - system message preservation ─────────────────────────────────────
+
+describe("ProviderTransform.message - system message preservation", () => {
+  const model = {
+    id: "test/test-model",
+    providerID: "test",
+    api: { id: "test-model", npm: "@ai-sdk/openai-compatible" },
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("preserves system messages", () => {
+    const msgs = [
+      { role: "system", content: "You are a helpful assistant" },
+      { role: "user", content: "Hello" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].role).toBe("system")
+    expect(result[0].content).toBe("You are a helpful assistant")
+  })
+
+  test("sanitizes surrogates in system messages", () => {
+    const msgs = [
+      { role: "system", content: "Rule: \uD83D" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result[0].content).toBe("Rule: \uFFFD")
+  })
+})
+
+describe("ProviderTransform.sanitizeSurrogates", () => {
+  test("replaces lone high surrogate with replacement character", () => {
+    expect(ProviderTransform.sanitizeSurrogates("\uD83D")).toBe("\uFFFD")
+  })
+
+  test("replaces lone low surrogate with replacement character", () => {
+    expect(ProviderTransform.sanitizeSurrogates("\uDE00")).toBe("\uFFFD")
+  })
+
+  test("preserves valid surrogate pairs (emoji)", () => {
+    expect(ProviderTransform.sanitizeSurrogates("🚀")).toBe("🚀")
+    expect(ProviderTransform.sanitizeSurrogates("😀")).toBe("😀")
+    expect(ProviderTransform.sanitizeSurrogates("🎉")).toBe("🎉")
+  })
+
+  test("preserves regular ASCII text", () => {
+    expect(ProviderTransform.sanitizeSurrogates("Hello, world!")).toBe("Hello, world!")
+  })
+
+  test("handles empty string", () => {
+    expect(ProviderTransform.sanitizeSurrogates("")).toBe("")
+  })
+
+  test("replaces multiple lone surrogates in a string", () => {
+    const input = "a\uD83Db\uDE00c\uD800d"
+    const result = ProviderTransform.sanitizeSurrogates(input)
+    expect(result).toBe("a\uFFFDb\uFFFDc\uFFFDd")
+  })
+
+  test("preserves valid emoji mixed with lone surrogates", () => {
+    const input = "🚀\uD83Dhello😀\uDE00"
+    const result = ProviderTransform.sanitizeSurrogates(input)
+    expect(result).toBe("🚀\uFFFDhello😀\uFFFD")
+  })
+
+  test("preserves CJK characters", () => {
+    expect(ProviderTransform.sanitizeSurrogates("你好世界")).toBe("你好世界")
+  })
+
+  test("preserves multi-byte characters mixed with emoji", () => {
+    expect(ProviderTransform.sanitizeSurrogates("café 🚀 naïve")).toBe("café 🚀 naïve")
+  })
+})
+
+describe("ProviderTransform.OUTPUT_TOKEN_MAX", () => {
+  test("is 32000", () => {
+    expect(ProviderTransform.OUTPUT_TOKEN_MAX).toBe(32_000)
+  })
+})
+
+describe("ProviderTransform.temperature", () => {
+  const createModel = (id: string) =>
+    ({
+      id,
+      providerID: "test",
+      api: { id, url: "", npm: "" },
+      name: id,
+      capabilities: {},
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 0, output: 0 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("returns 0.55 for qwen models", () => {
+    expect(ProviderTransform.temperature(createModel("qwen-plus"))).toBe(0.55)
+    expect(ProviderTransform.temperature(createModel("qwen-max"))).toBe(0.55)
+    expect(ProviderTransform.temperature(createModel("QWEN-turbo"))).toBe(0.55)
+  })
+
+  test("returns undefined for claude models", () => {
+    expect(ProviderTransform.temperature(createModel("claude-3-5-sonnet"))).toBeUndefined()
+    expect(ProviderTransform.temperature(createModel("anthropic/claude-opus"))).toBeUndefined()
+  })
+
+  test("returns 1.0 for gemini models", () => {
+    expect(ProviderTransform.temperature(createModel("gemini-2.5-pro"))).toBe(1.0)
+    expect(ProviderTransform.temperature(createModel("gemini-3-flash"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for glm-4.6 and glm-4.7", () => {
+    expect(ProviderTransform.temperature(createModel("glm-4.6"))).toBe(1.0)
+    expect(ProviderTransform.temperature(createModel("glm-4.7"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for minimax-m2", () => {
+    expect(ProviderTransform.temperature(createModel("minimax-m2"))).toBe(1.0)
+  })
+
+  test("returns 1.0 for kimi-k2 thinking variants", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2-thinking"))).toBe(1.0)
+    expect(ProviderTransform.temperature(createModel("kimi-k2.5"))).toBe(1.0)
+    expect(ProviderTransform.temperature(createModel("kimi-k2p5"))).toBe(1.0)
+    expect(ProviderTransform.temperature(createModel("kimi-k2-5"))).toBe(1.0)
+  })
+
+  test("returns 0.6 for kimi-k2 base", () => {
+    expect(ProviderTransform.temperature(createModel("kimi-k2"))).toBe(0.6)
+    expect(ProviderTransform.temperature(createModel("kimi-k2-base"))).toBe(0.6)
+  })
+
+  test("returns undefined for unknown models", () => {
+    expect(ProviderTransform.temperature(createModel("gpt-4"))).toBeUndefined()
+    expect(ProviderTransform.temperature(createModel("llama-3"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.topP", () => {
+  const createModel = (id: string) =>
+    ({
+      id,
+      providerID: "test",
+      api: { id, url: "", npm: "" },
+      name: id,
+      capabilities: {},
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 0, output: 0 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("returns 1 for qwen models", () => {
+    expect(ProviderTransform.topP(createModel("qwen-plus"))).toBe(1)
+  })
+
+  test("returns 0.95 for minimax-m2", () => {
+    expect(ProviderTransform.topP(createModel("minimax-m2"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for gemini models", () => {
+    expect(ProviderTransform.topP(createModel("gemini-2.5-pro"))).toBe(0.95)
+  })
+
+  test("returns 0.95 for kimi-k2.5/k2p5/k2-5", () => {
+    expect(ProviderTransform.topP(createModel("kimi-k2.5"))).toBe(0.95)
+    expect(ProviderTransform.topP(createModel("kimi-k2p5"))).toBe(0.95)
+    expect(ProviderTransform.topP(createModel("kimi-k2-5"))).toBe(0.95)
+  })
+
+  test("returns undefined for unknown models", () => {
+    expect(ProviderTransform.topP(createModel("gpt-4"))).toBeUndefined()
+    expect(ProviderTransform.topP(createModel("claude-3"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.topK", () => {
+  const createModel = (id: string) =>
+    ({
+      id,
+      providerID: "test",
+      api: { id, url: "", npm: "" },
+      name: id,
+      capabilities: {},
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 0, output: 0 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("returns 20 for minimax-m2 base", () => {
+    expect(ProviderTransform.topK(createModel("minimax-m2"))).toBe(20)
+  })
+
+  test("returns 40 for minimax-m2 versioned variants", () => {
+    expect(ProviderTransform.topK(createModel("minimax-m2.5"))).toBe(40)
+    expect(ProviderTransform.topK(createModel("minimax-m25"))).toBe(40)
+    expect(ProviderTransform.topK(createModel("minimax-m21"))).toBe(40)
+  })
+
+  test("returns 64 for gemini models", () => {
+    expect(ProviderTransform.topK(createModel("gemini-2.5-pro"))).toBe(64)
+    expect(ProviderTransform.topK(createModel("gemini-3-flash"))).toBe(64)
+  })
+
+  test("returns undefined for unknown models", () => {
+    expect(ProviderTransform.topK(createModel("gpt-4"))).toBeUndefined()
+    expect(ProviderTransform.topK(createModel("claude-3"))).toBeUndefined()
+  })
+})
+
+describe("ProviderTransform.maxOutputTokens", () => {
+  const createModel = (outputLimit: number) =>
+    ({
+      id: "test/model",
+      providerID: "test",
+      api: { id: "model", url: "", npm: "" },
+      name: "Test",
+      capabilities: {},
+      cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+      limit: { context: 128000, output: outputLimit },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("returns model limit when below OUTPUT_TOKEN_MAX", () => {
+    expect(ProviderTransform.maxOutputTokens(createModel(8192))).toBe(8192)
+    expect(ProviderTransform.maxOutputTokens(createModel(16000))).toBe(16000)
+  })
+
+  test("returns OUTPUT_TOKEN_MAX when model limit exceeds it", () => {
+    expect(ProviderTransform.maxOutputTokens(createModel(64000))).toBe(32_000)
+    expect(ProviderTransform.maxOutputTokens(createModel(128000))).toBe(32_000)
+  })
+
+  test("returns OUTPUT_TOKEN_MAX when model limit equals it", () => {
+    expect(ProviderTransform.maxOutputTokens(createModel(32_000))).toBe(32_000)
+  })
+
+  test("respects custom outputTokenMax parameter", () => {
+    expect(ProviderTransform.maxOutputTokens(createModel(64000), 16000)).toBe(16000)
+    expect(ProviderTransform.maxOutputTokens(createModel(8192), 16000)).toBe(8192)
+  })
+
+  test("falls back to outputTokenMax when model limit is 0", () => {
+    expect(ProviderTransform.maxOutputTokens(createModel(0))).toBe(32_000)
+    expect(ProviderTransform.maxOutputTokens(createModel(0), 16000)).toBe(16000)
+  })
+})
+
+describe("ProviderTransform.message - claude tool ID scrubbing", () => {
+  const claudeModel = {
+    id: "anthropic/claude-3-5-sonnet",
+    providerID: "anthropic",
+    api: {
+      id: "claude-3-5-sonnet-20241022",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude 3.5 Sonnet",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("scrubs non-alphanumeric characters from tool call IDs", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call_abc.123!@#", toolName: "bash", input: {} },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, claudeModel, {}) as any[]
+
+    expect(result[0].content[0].toolCallId).toBe("call_abc_123___")
+  })
+
+  test("scrubs tool result IDs in tool messages", () => {
+    const msgs = [
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "call$%^test", toolName: "bash", output: { type: "text", value: "ok" } },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, claudeModel, {}) as any[]
+
+    expect(result[0].content[0].toolCallId).toBe("call___test")
+  })
+
+  test("preserves valid alphanumeric and _/- characters", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "toolu_01ABC-xyz", toolName: "bash", input: {} },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, claudeModel, {}) as any[]
+
+    expect(result[0].content[0].toolCallId).toBe("toolu_01ABC-xyz")
+  })
+
+  test("does not scrub for non-claude models", () => {
+    const openaiModel = {
+      ...claudeModel,
+      id: "openai/gpt-4",
+      providerID: "openai",
+      api: { id: "gpt-4", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+    }
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call_abc.123!@#", toolName: "bash", input: {} },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, openaiModel, {}) as any[]
+
+    expect(result[0].content[0].toolCallId).toBe("call_abc.123!@#")
+  })
+})
+
+describe("ProviderTransform.message - mistral transforms", () => {
+  const mistralModel = {
+    id: "mistral/mistral-large",
+    providerID: "mistral",
+    api: {
+      id: "mistral-large-latest",
+      url: "https://api.mistral.com",
+      npm: "@ai-sdk/mistral",
+    },
+    name: "Mistral Large",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("scrubs tool call IDs to 9 alphanumeric chars padded with zeros", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call_abc!@#", toolName: "bash", input: {} },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {}) as any[]
+
+    // "callabc" (7 alphanumeric chars) padded to 9 → "callabc00"
+    expect(result[0].content[0].toolCallId).toBe("callabc00")
+  })
+
+  test("truncates long tool call IDs to 9 chars", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "abcdefghijklmnop", toolName: "bash", input: {} },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {}) as any[]
+
+    expect(result[0].content[0].toolCallId).toBe("abcdefghi")
+  })
+
+  test("inserts assistant message between tool and user messages", () => {
+    const msgs = [
+      { role: "user", content: "Do something" },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call1", toolName: "bash", input: {} },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "call1", toolName: "bash", output: { type: "text", value: "done" } },
+        ],
+      },
+      { role: "user", content: "Next task" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {}) as any[]
+
+    expect(result).toHaveLength(5)
+    expect(result[3].role).toBe("assistant")
+    expect(result[3].content).toEqual([{ type: "text", text: "Done." }])
+    expect(result[4].role).toBe("user")
+    expect(result[4].content).toBe("Next task")
+  })
+
+  test("does not insert assistant message when tool is not followed by user", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call1", toolName: "bash", input: {} },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          { type: "tool-result", toolCallId: "call1", toolName: "bash", output: { type: "text", value: "done" } },
+        ],
+      },
+      {
+        role: "assistant",
+        content: "Result",
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, mistralModel, {}) as any[]
+
+    expect(result).toHaveLength(3)
+  })
+
+  test("also triggers for devstral model IDs", () => {
+    const devstralModel = {
+      ...mistralModel,
+      id: "mistral/devstral-small",
+      providerID: "mistral",
+      api: { ...mistralModel.api, id: "devstral-small-latest" },
+    }
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "call1", toolName: "bash", input: {} },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, devstralModel, {}) as any[]
+
+    // Should have been scrubbed (mistral transform applied)
+    expect(result[0].content[0].toolCallId).toHaveLength(9)
+  })
+})
+
+describe("ProviderTransform.message - deepseek reasoning injection", () => {
+  const deepseekModel = {
+    id: "deepseek/deepseek-chat",
+    providerID: "deepseek",
+    api: {
+      id: "deepseek-chat",
+      url: "https://api.deepseek.com",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    name: "DeepSeek Chat",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: false,
+      toolcall: true,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("adds empty reasoning part to assistant messages without reasoning", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Hello" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[1]).toEqual({ type: "reasoning", text: "" })
+  })
+
+  test("does not add reasoning when already present", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Thinking..." },
+          { type: "text", text: "Hello" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0]).toEqual({ type: "reasoning", text: "Thinking..." })
+  })
+
+  test("converts string content to array with reasoning for deepseek", () => {
+    const msgs = [
+      { role: "assistant", content: "Hello" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0]).toEqual({ type: "text", text: "Hello" })
+    expect(result[0].content[1]).toEqual({ type: "reasoning", text: "" })
+  })
+
+  test("does not inject reasoning for non-assistant messages", () => {
+    const msgs = [
+      { role: "user", content: "Hello" },
+      { role: "system", content: "You are helpful" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, deepseekModel, {}) as any[]
+
+    expect(result[0].content).toBe("Hello")
+    expect(result[1].content).toBe("You are helpful")
+  })
+
+  test("does not inject reasoning for non-deepseek models", () => {
+    const openaiModel = {
+      ...deepseekModel,
+      id: "openai/gpt-4",
+      providerID: "openai",
+      api: { id: "gpt-4", url: "https://api.openai.com", npm: "@ai-sdk/openai" },
+    }
+    const msgs = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Hello" }],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, openaiModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(1)
+  })
+})
+
+describe("ProviderTransform.message - unsupported modality replacement", () => {
+  const textOnlyModel = {
+    id: "test/text-only",
+    providerID: "test",
+    api: {
+      id: "text-only",
+      url: "https://api.test.com",
+      npm: "@ai-sdk/openai-compatible",
+    },
+    name: "Text Only Model",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: false,
+      toolcall: false,
+      input: { text: true, audio: false, image: false, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("replaces unsupported image with error text", () => {
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Look at this" },
+          { type: "image", image: "data:image/png;base64,abc123" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, textOnlyModel, {}) as any[]
+
+    expect(result[0].content[1]).toEqual({
+      type: "text",
+      text: expect.stringContaining("this model does not support image"),
+    })
+  })
+
+  test("replaces unsupported PDF file with error text", () => {
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "file", data: "base64data", mediaType: "application/pdf", filename: "doc.pdf" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, textOnlyModel, {}) as any[]
+
+    expect(result[0].content[0]).toEqual({
+      type: "text",
+      text: expect.stringContaining('"doc.pdf"'),
+    })
+    expect(result[0].content[0].text).toContain("pdf")
+  })
+
+  test("preserves supported modalities", () => {
+    const imageModel = {
+      ...textOnlyModel,
+      capabilities: {
+        ...textOnlyModel.capabilities,
+        input: { text: true, audio: false, image: true, video: false, pdf: false },
+      },
+    }
+    const msgs = [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Look at this" },
+          { type: "image", image: "data:image/png;base64,abc123" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, imageModel, {}) as any[]
+
+    expect(result[0].content[1]).toEqual({ type: "image", image: "data:image/png;base64,abc123" })
+  })
+
+  test("does not modify non-user messages", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Here is an image" },
+          { type: "image", image: "data:image/png;base64,abc123" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, textOnlyModel, {}) as any[]
+
+    // unsupportedParts only applies to user messages
+    expect(result[0].content[1]).toEqual({ type: "image", image: "data:image/png;base64,abc123" })
+  })
+})
+
+describe("ProviderTransform.message - empty messages array", () => {
+  const model = {
+    id: "test/model",
+    providerID: "test",
+    api: { id: "model", url: "", npm: "@ai-sdk/openai-compatible" },
+    name: "Test",
+    capabilities: {
+      temperature: true,
+      reasoning: false,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: false },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+    limit: { context: 128000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("handles empty messages array", () => {
+    const result = ProviderTransform.message([], model, {})
+    expect(result).toEqual([])
+  })
+
+  test("handles single system message", () => {
+    const msgs = [{ role: "system", content: "You are helpful" }] as any[]
+    const result = ProviderTransform.message(msgs, model, {})
+    expect(result).toHaveLength(1)
+    expect(result[0].content).toBe("You are helpful")
+  })
+})
+
+describe("ProviderTransform.message - interleaved reasoning field", () => {
+  const createInterleavedModel = (field: "reasoning_content" | "reasoning_details") =>
+    ({
+      id: "deepseek/deepseek-chat",
+      providerID: "deepseek",
+      api: {
+        id: "deepseek-chat",
+        url: "https://api.deepseek.com",
+        npm: "@ai-sdk/openai-compatible",
+      },
+      name: "DeepSeek Chat",
+      capabilities: {
+        temperature: true,
+        reasoning: true,
+        attachment: false,
+        toolcall: true,
+        input: { text: true, audio: false, image: false, video: false, pdf: false },
+        output: { text: true, audio: false, image: false, video: false, pdf: false },
+        interleaved: { field },
+      },
+      cost: { input: 0.001, output: 0.002, cache: { read: 0.0001, write: 0.0002 } },
+      limit: { context: 128000, output: 8192 },
+      status: "active",
+      options: {},
+      headers: {},
+    }) as any
+
+  test("moves reasoning parts to providerOptions with reasoning_content field", () => {
+    const model = createInterleavedModel("reasoning_content")
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Let me think..." },
+          { type: "text", text: "The answer is 42" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    expect(result[0].content).toEqual([{ type: "text", text: "The answer is 42" }])
+    expect(result[0].providerOptions?.openaiCompatible?.reasoning_content).toBe("Let me think...")
+  })
+
+  test("concatenates multiple reasoning parts", () => {
+    const model = createInterleavedModel("reasoning_content")
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Step 1. " },
+          { type: "reasoning", text: "Step 2." },
+          { type: "text", text: "Done" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    expect(result[0].providerOptions?.openaiCompatible?.reasoning_content).toBe("Step 1. Step 2.")
+  })
+
+  test("uses reasoning_details field when configured", () => {
+    const model = createInterleavedModel("reasoning_details")
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Thinking..." },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    expect(result[0].providerOptions?.openaiCompatible?.reasoning_details).toBe("Thinking...")
+    expect(result[0].providerOptions?.openaiCompatible?.reasoning_content).toBeUndefined()
+  })
+
+  test("sets empty reasoning field for assistant messages without reasoning", () => {
+    const model = createInterleavedModel("reasoning_content")
+    const msgs = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Just text" }],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    // Always set the field even when empty for DeepSeek compatibility
+    expect(result[0].providerOptions?.openaiCompatible?.reasoning_content).toBe("")
+  })
+
+  test("does not apply to non-assistant messages", () => {
+    const model = createInterleavedModel("reasoning_content")
+    const msgs = [
+      { role: "user", content: "Hello" },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    expect(result[0].providerOptions).toBeUndefined()
+  })
+
+  test("skips openrouter provider even with interleaved capability", () => {
+    const model = {
+      ...createInterleavedModel("reasoning_content"),
+      api: {
+        id: "deepseek/deepseek-chat",
+        url: "https://openrouter.ai",
+        npm: "@openrouter/ai-sdk-provider",
+      },
+    }
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "Thinking..." },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, model, {}) as any[]
+
+    // OpenRouter is excluded from interleaved transform
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0]).toEqual({ type: "reasoning", text: "Thinking..." })
+  })
+})
+
+describe("ProviderTransform.message - anthropic reasoning with signature/redactedData", () => {
+  const anthropicModel = {
+    id: "anthropic/claude-3-5-sonnet",
+    providerID: "anthropic",
+    api: {
+      id: "claude-3-5-sonnet-20241022",
+      url: "https://api.anthropic.com",
+      npm: "@ai-sdk/anthropic",
+    },
+    name: "Claude 3.5 Sonnet",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("keeps empty reasoning part with anthropic signature", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "", providerOptions: { anthropic: { signature: "sig_123" } } },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0].type).toBe("reasoning")
+  })
+
+  test("keeps empty reasoning part with anthropic redactedData", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "", providerOptions: { anthropic: { redactedData: "base64data" } } },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0].type).toBe("reasoning")
+  })
+
+  test("removes empty reasoning without signature or redactedData", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "  " },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, anthropicModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(1)
+    expect(result[0].content[0]).toEqual({ type: "text", text: "Answer" })
+  })
+})
+
+describe("ProviderTransform.message - bedrock reasoning with signature/redactedData", () => {
+  const bedrockModel = {
+    id: "amazon-bedrock/anthropic.claude-opus-4-6",
+    providerID: "amazon-bedrock",
+    api: {
+      id: "anthropic.claude-opus-4-6",
+      url: "https://bedrock-runtime.us-east-1.amazonaws.com",
+      npm: "@ai-sdk/amazon-bedrock",
+    },
+    name: "Claude Opus 4.6",
+    capabilities: {
+      temperature: true,
+      reasoning: true,
+      attachment: true,
+      toolcall: true,
+      input: { text: true, audio: false, image: true, video: false, pdf: true },
+      output: { text: true, audio: false, image: false, video: false, pdf: false },
+      interleaved: false,
+    },
+    cost: { input: 0.003, output: 0.015, cache: { read: 0.0003, write: 0.00375 } },
+    limit: { context: 200000, output: 8192 },
+    status: "active",
+    options: {},
+    headers: {},
+  } as any
+
+  test("keeps empty reasoning part with bedrock signature", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "", providerOptions: { bedrock: { signature: "sig_456" } } },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, bedrockModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+    expect(result[0].content[0].type).toBe("reasoning")
+  })
+
+  test("keeps empty reasoning part with bedrock redactedData", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "", providerOptions: { bedrock: { redactedData: "data" } } },
+          { type: "text", text: "Answer" },
+        ],
+      },
+    ] as any[]
+
+    const result = ProviderTransform.message(msgs, bedrockModel, {}) as any[]
+
+    expect(result[0].content).toHaveLength(2)
+  })
+})
+
+describe("ProviderTransform.schema - gemini integer enum conversion", () => {
+  const geminiModel = {
+    providerID: "google",
+    api: { id: "gemini-2.5-pro" },
+  } as any
+
+  test("converts integer enums to string enums", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        priority: {
+          type: "integer",
+          enum: [1, 2, 3],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+
+    expect(result.properties.priority.enum).toEqual(["1", "2", "3"])
+    expect(result.properties.priority.type).toBe("string")
+  })
+
+  test("converts number enums to string enums", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        score: {
+          type: "number",
+          enum: [0.5, 1.0, 1.5],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+
+    expect(result.properties.score.enum).toEqual(["0.5", "1", "1.5"])
+    expect(result.properties.score.type).toBe("string")
+  })
+
+  test("preserves string enums", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        color: {
+          type: "string",
+          enum: ["red", "green", "blue"],
+        },
+      },
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+
+    expect(result.properties.color.enum).toEqual(["red", "green", "blue"])
+    expect(result.properties.color.type).toBe("string")
+  })
+
+  test("filters required to only include fields in properties", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+      required: ["name", "missing_field"],
+    } as any
+
+    const result = ProviderTransform.schema(geminiModel, schema) as any
+
+    expect(result.required).toEqual(["name"])
+  })
+})

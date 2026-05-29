@@ -62,6 +62,7 @@ import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
 import { MemoryExtraction } from "@/memory/extraction"
+import { MemoryAutoDream } from "@/memory/autoDream"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -76,6 +77,8 @@ IMPORTANT:
 - The input must be valid JSON matching the required schema
 - Complete all necessary research and tool calls BEFORE calling this tool
 - This tool provides your final answer - no further actions are taken after calling it`
+
+const MAX_COMPACT_ATTEMPTS = 3
 
 const STRUCTURED_OUTPUT_SYSTEM_PROMPT = `IMPORTANT: The user has requested structured output. You MUST use the StructuredOutput tool to provide your final response. Do NOT respond with plain text - you MUST call the StructuredOutput tool with your answer formatted according to the schema.`
 
@@ -1253,6 +1256,7 @@ export const layer = Layer.effect(
         let structured: unknown
         let step = 0
         let lastQueryText = ""
+        let compactAttempts = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
@@ -1321,7 +1325,9 @@ export const layer = Layer.effect(
               auto: task.auto,
               overflow: task.overflow,
             })
-            if (result === "stop") break
+            if (result === "stop") {
+              break
+            }
             continue
           }
 
@@ -1330,8 +1336,16 @@ export const layer = Layer.effect(
             lastFinished.summary !== true &&
             (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
           ) {
+            if (compactAttempts >= MAX_COMPACT_ATTEMPTS) {
+              yield* slog.warn("compact circuit breaker tripped", { attempts: compactAttempts })
+              break
+            }
+            compactAttempts++
             yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
             continue
+          } else if (lastFinished && lastFinished.summary !== true) {
+            // Reset counter on successful non-overflow calls
+            compactAttempts = 0
           }
 
           const agent = yield* agents.get(lastUser.agent)
@@ -1494,8 +1508,15 @@ export const layer = Layer.effect(
               }
             }
 
-            if (result === "stop") return "break" as const
+            if (result === "stop") {
+              return "break" as const
+            }
             if (result === "compact") {
+              compactAttempts++
+              if (compactAttempts >= MAX_COMPACT_ATTEMPTS) {
+                yield* slog.warn("compact circuit breaker tripped", { attempts: compactAttempts })
+                return "break" as const
+              }
               yield* compaction.create({
                 sessionID,
                 agent: lastUser.agent,
@@ -1503,6 +1524,8 @@ export const layer = Layer.effect(
                 auto: true,
                 overflow: !handle.message.finish,
               })
+            } else {
+              compactAttempts = 0
             }
             return "continue" as const
           }).pipe(

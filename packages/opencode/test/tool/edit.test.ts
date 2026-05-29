@@ -14,6 +14,10 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import * as Tool from "../../src/tool/tool"
 import { testEffect } from "../lib/effect"
 import { FileWatcher } from "../../src/file/watcher"
+import { Plugin } from "../../src/plugin"
+import { Config } from "@/config/config"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -31,12 +35,16 @@ afterEach(async () => {
 })
 
 const layer = Layer.mergeAll(
-  LSP.defaultLayer,
+  CrossSpawnSpawner.defaultLayer,
   AppFileSystem.defaultLayer,
+  Plugin.defaultLayer,
+  Truncate.defaultLayer,
+  Config.defaultLayer,
+  Agent.defaultLayer,
+  RuntimeFlags.defaultLayer,
+  LSP.defaultLayer,
   Format.defaultLayer,
   Bus.layer,
-  Truncate.defaultLayer,
-  Agent.defaultLayer,
 )
 
 const it = testEffect(layer)
@@ -527,6 +535,101 @@ describe("tool.edit", () => {
         ])
 
         expect(yield* load(filepath)).toBe("top = 1\nmiddle = keep\nbottom = 2\n")
+      }),
+    )
+
+    it.instance("serializes concurrent edits to the same file via locking", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "lock-test.txt")
+        yield* put(filepath, "aaa\nbbb\nccc\n")
+
+        const results = yield* Effect.all(
+          [
+            run({ filePath: filepath, oldString: "aaa", newString: "AAA" }),
+            run({ filePath: filepath, oldString: "bbb", newString: "BBB" }),
+            run({ filePath: filepath, oldString: "ccc", newString: "CCC" }),
+          ],
+          { concurrency: 3 },
+        )
+
+        for (const result of results) {
+          expect(result.output).toContain("Edit applied successfully")
+        }
+        expect(yield* load(filepath)).toBe("AAA\nBBB\nCCC\n")
+      }),
+    )
+  })
+
+  describe("ambiguous match handling", () => {
+    it.instance("fails when oldString matches multiple locations without replaceAll", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "ambiguous.txt")
+        yield* put(filepath, "foo\nfoo\nbar")
+
+        const err = yield* fail({ filePath: filepath, oldString: "foo", newString: "baz" })
+        expect(err.message).toContain("multiple matches")
+      }),
+    )
+
+    it.instance("does not modify file when ambiguous match is detected", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "ambiguous-nochange.txt")
+        const original = "foo\nfoo\nbar"
+        yield* put(filepath, original)
+
+        yield* fail({ filePath: filepath, oldString: "foo", newString: "baz" })
+        expect(yield* load(filepath)).toBe(original)
+      }),
+    )
+  })
+
+  describe("replaceAll edge cases", () => {
+    it.instance("fails when replaceAll finds zero matches", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "replaceall-zero.txt")
+        yield* put(filepath, "actual content here")
+
+        const err = yield* fail({ filePath: filepath, oldString: "missing", newString: "replacement", replaceAll: true })
+        expect(err).toBeInstanceOf(Error)
+      }),
+    )
+
+    it.instance("replaces exactly two occurrences with replaceAll", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "replaceall-two.txt")
+        yield* put(filepath, "hello world hello")
+
+        yield* run({ filePath: filepath, oldString: "hello", newString: "hi", replaceAll: true })
+        expect(yield* load(filepath)).toBe("hi world hi")
+      }),
+    )
+  })
+
+  describe("empty string edge cases", () => {
+    it.instance("replaces content with empty newString (deletion)", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "delete.txt")
+        yield* put(filepath, "keep this REMOVE_ME keep this")
+
+        yield* run({ filePath: filepath, oldString: "REMOVE_ME ", newString: "" })
+        expect(yield* load(filepath)).toBe("keep this keep this")
+      }),
+    )
+
+    it.instance("fails when searching for oldString in empty file", () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const filepath = path.join(test.directory, "empty.txt")
+        yield* put(filepath, "")
+
+        const err = yield* fail({ filePath: filepath, oldString: "something", newString: "else" })
+        expect(err).toBeInstanceOf(Error)
       }),
     )
   })

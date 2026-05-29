@@ -9,6 +9,9 @@ import { MemoryExtraction } from "../../src/memory/extraction"
 import { SystemPrompt } from "../../src/session/system"
 import { SystemCache } from "../../src/session/system-cache"
 import { Skill } from "../../src/skill"
+import { Provider } from "../../src/provider/provider"
+import { RuntimeFlags } from "../../src/effect/runtime-flags"
+import { Config } from "../../src/config/config"
 import { testEffect } from "../lib/effect"
 import os from "os"
 import path from "path"
@@ -38,7 +41,12 @@ function fullPipelineLayer() {
   counter++
   const projectPath = `/test/lifecycle-${counter}-${Date.now()}`
   const memoryLayer = Memory.layer(projectPath).pipe(Layer.provide(storageLayer))
-  const retrievalLayer = MemoryRetrieval.layer.pipe(Layer.provideMerge(memoryLayer))
+  const retrievalLayer = MemoryRetrieval.layer.pipe(
+    Layer.provideMerge(memoryLayer),
+    Layer.provide(Provider.defaultLayer),
+    Layer.provide(RuntimeFlags.defaultLayer),
+    Layer.provide(Config.defaultLayer),
+  )
   const extractionLayer = MemoryExtraction.layer.pipe(Layer.provideMerge(memoryLayer))
   const systemLayer = SystemPrompt.layer.pipe(
     Layer.provide(mockSkillLayer),
@@ -50,7 +58,12 @@ function fullPipelineLayer() {
 
 function crossSessionLayers(projectPath: string) {
   const memoryLayer = Memory.layer(projectPath).pipe(Layer.provide(storageLayer))
-  const retrievalLayer = MemoryRetrieval.layer.pipe(Layer.provideMerge(memoryLayer))
+  const retrievalLayer = MemoryRetrieval.layer.pipe(
+    Layer.provideMerge(memoryLayer),
+    Layer.provide(Provider.defaultLayer),
+    Layer.provide(RuntimeFlags.defaultLayer),
+    Layer.provide(Config.defaultLayer),
+  )
   return Layer.mergeAll(memoryLayer, retrievalLayer)
 }
 

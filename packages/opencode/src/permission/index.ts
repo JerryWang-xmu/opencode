@@ -16,6 +16,89 @@ import { PermissionID } from "./schema"
 
 const log = Log.create({ service: "permission" })
 
+// Bypass-immune protected paths that always require user confirmation
+// These paths are critical system files that should never be modified without explicit permission
+const PROTECTED_PATHS = [
+  // Git internals
+  ".git",
+  ".git/**",
+  "**/.git",
+  "**/.git/**",
+  // Environment and secrets
+  ".env",
+  ".env.*",
+  "**/.env",
+  "**/.env.*",
+  // SSH keys and credentials
+  ".ssh",
+  ".ssh/**",
+  "**/.ssh",
+  "**/.ssh/**",
+  ".gnupg",
+  ".gnupg/**",
+  "**/.gnupg",
+  "**/.gnupg/**",
+  ".aws/credentials",
+  "**/.aws/credentials",
+  ".aws/config",
+  "**/.aws/config",
+  ".kube/config",
+  "**/.kube/config",
+  ".docker/config.json",
+  "**/.docker/config.json",
+  ".npmrc",
+  "**/.npmrc",
+  ".yarnrc",
+  "**/.yarnrc",
+  ".pypirc",
+  "**/.pypirc",
+  // System configuration
+  ".bashrc",
+  "**/.bashrc",
+  ".bash_profile",
+  "**/.bash_profile",
+  ".zshrc",
+  "**/.zshrc",
+  ".profile",
+  "**/.profile",
+  ".config/git/**",
+  "**/.config/git/**",
+  ".config/gcloud/**",
+  "**/.config/gcloud/**",
+  ".config/ssh/**",
+  "**/.config/ssh/**",
+  // Package manager locks (should not be auto-modified)
+  "package-lock.json",
+  "**/package-lock.json",
+  "yarn.lock",
+  "**/yarn.lock",
+  "pnpm-lock.yaml",
+  "**/pnpm-lock.yaml",
+  "bun.lockb",
+  "**/bun.lockb",
+  "Gemfile.lock",
+  "**/Gemfile.lock",
+  "poetry.lock",
+  "**/poetry.lock",
+  "Pipfile.lock",
+  "**/Pipfile.lock",
+  // Network and infrastructure credentials
+  ".netrc",
+  "**/.netrc",
+  ".gitconfig",
+  "**/.gitconfig",
+  ".yarnrc.yml",
+  "**/.yarnrc.yml",
+  "credentials.json",
+  "**/credentials.json",
+  ".terraform",
+  ".terraform/**",
+  "**/.terraform",
+  "**/.terraform/**",
+  "terraform.tfstate",
+  "**/terraform.tfstate",
+]
+
 export const Action = PermissionV2.Action.annotate({ identifier: "PermissionAction" })
 export type Action = Schema.Schema.Type<typeof Action>
 
@@ -139,6 +222,10 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Rules
   return PermissionV2.evaluate(permission, pattern, ...rulesets)
 }
 
+export function isProtectedPath(path: string): boolean {
+  return PROTECTED_PATHS.some((protectedPattern) => Wildcard.match(path, protectedPattern))
+}
+
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}
 
 export const layer = Layer.effect(
@@ -173,6 +260,9 @@ export const layer = Layer.effect(
       const { ruleset, ...request } = input
       let needsAsk = false
 
+      // Check if any pattern matches protected paths - these always require confirmation
+      const hasProtectedPath = request.patterns.some((pattern) => isProtectedPath(pattern))
+
       for (const pattern of request.patterns) {
         const rule = evaluate(request.permission, pattern, ruleset, approved)
         log.info("evaluated", { permission: request.permission, pattern, action: rule })
@@ -180,6 +270,11 @@ export const layer = Layer.effect(
           return yield* new DeniedError({
             ruleset: ruleset.filter((rule) => Wildcard.match(request.permission, rule.permission)),
           })
+        }
+        // Protected paths always require confirmation, even if user granted broad permissions
+        if (hasProtectedPath && rule.action === "allow") {
+          needsAsk = true
+          continue
         }
         if (rule.action === "allow") continue
         needsAsk = true

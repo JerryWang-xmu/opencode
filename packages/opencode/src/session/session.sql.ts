@@ -50,6 +50,7 @@ export const SessionTable = sqliteTable(
     ...Timestamps,
     time_compacting: integer(),
     time_archived: integer(),
+    latched_headers: text({ mode: "json" }).$type<Record<string, string>>(),
   },
   (table) => [
     index("session_project_idx").on(table.project_id),

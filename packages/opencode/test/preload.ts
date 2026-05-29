@@ -83,6 +83,9 @@ process.env["OPENCODE_DB"] = ":memory:"
 const { Log } = await import("@opencode-ai/core/util/log")
 const { initProjectors } = await import("../src/server/projectors")
 
+// Ensure log directory exists before Log.init (xdg-basedir paths are set above)
+await fs.mkdir(path.join(dir, "share", "opencode", "log"), { recursive: true })
+
 void Log.init({
   print: false,
   dev: true,

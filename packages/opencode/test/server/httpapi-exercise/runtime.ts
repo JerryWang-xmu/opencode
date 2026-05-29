@@ -4,6 +4,7 @@ export type Runtime = {
   AppLayer: (typeof import("../../../src/effect/app-runtime"))["AppLayer"]
   InstanceRef: (typeof import("../../../src/effect/instance-ref"))["InstanceRef"]
   InstanceStore: (typeof import("../../../src/project/instance-store"))["InstanceStore"]
+  InstanceBootstrap: (typeof import("../../../src/project/bootstrap"))["InstanceBootstrap"]
   Session: (typeof import("../../../src/session/session"))["Session"]
   Todo: (typeof import("../../../src/session/todo"))["Todo"]
   Worktree: (typeof import("../../../src/worktree"))["Worktree"]
@@ -23,6 +24,7 @@ export function runtime() {
     const appRuntime = await import("../../../src/effect/app-runtime")
     const instanceRef = await import("../../../src/effect/instance-ref")
     const instanceStore = await import("../../../src/project/instance-store")
+    const instanceBootstrap = await import("../../../src/project/bootstrap")
     const session = await import("../../../src/session/session")
     const todo = await import("../../../src/session/todo")
     const worktree = await import("../../../src/worktree")
@@ -36,6 +38,7 @@ export function runtime() {
       AppLayer: appRuntime.AppLayer,
       InstanceRef: instanceRef.InstanceRef,
       InstanceStore: instanceStore.InstanceStore,
+      InstanceBootstrap: instanceBootstrap.InstanceBootstrap,
       Session: session.Session,
       Todo: todo.Todo,
       Worktree: worktree.Worktree,

@@ -37,6 +37,12 @@ describe("session.retry.delay", () => {
     expect(delays).toStrictEqual([2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000, 30000, 30000])
   })
 
+  test("caps delay at 30 seconds when headers present but no retry-after", () => {
+    const error = apiError({ "x-request-id": "abc123" })
+    const delays = Array.from({ length: 10 }, (_, index) => SessionRetry.delay(index + 1, error))
+    expect(delays).toStrictEqual([2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000, 30000, 30000])
+  })
+
   test("prefers retry-after-ms when shorter than exponential", () => {
     const error = apiError({ "retry-after-ms": "1500" })
     expect(SessionRetry.delay(4, error)).toBe(1500)
@@ -207,6 +213,61 @@ describe("session.retry.retryable", () => {
     )
 
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Service unavailable" })
+  })
+
+  test("retries 529 overloaded errors for foreground queries", () => {
+    const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
+      new MessageV2.APIError({
+        message: "Overloaded",
+        isRetryable: true,
+        statusCode: 529,
+      }).toObject(),
+    )
+
+    expect(SessionRetry.retryable(error, retryProvider, "foreground")).toEqual({
+      message: "Provider is overloaded",
+    })
+  })
+
+  test("does not retry 529 overloaded errors for background queries", () => {
+    const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
+      new MessageV2.APIError({
+        message: "Overloaded",
+        isRetryable: true,
+        statusCode: 529,
+      }).toObject(),
+    )
+
+    expect(SessionRetry.retryable(error, retryProvider, "background")).toBeUndefined()
+  })
+
+  test("retries other 5xx errors for background queries", () => {
+    const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
+      new MessageV2.APIError({
+        message: "Internal server error",
+        isRetryable: false,
+        statusCode: 500,
+      }).toObject(),
+    )
+
+    expect(SessionRetry.retryable(error, retryProvider, "background")).toEqual({
+      message: "Internal server error",
+    })
+  })
+
+  test("defaults to foreground when querySource not specified", () => {
+    const error = Schema.decodeUnknownSync(MessageV2.APIError.Schema)(
+      new MessageV2.APIError({
+        message: "Overloaded",
+        isRetryable: true,
+        statusCode: 529,
+      }).toObject(),
+    )
+
+    // Should retry 529 when querySource is not specified (defaults to foreground)
+    expect(SessionRetry.retryable(error, retryProvider)).toEqual({
+      message: "Provider is overloaded",
+    })
   })
 
   test("does not retry 4xx errors when isRetryable is false", () => {

@@ -31,15 +31,16 @@ export const Path = paths
 
 Flock.setGlobal({ state })
 
-await Promise.all([
-  fs.mkdir(Path.data, { recursive: true }),
-  fs.mkdir(Path.config, { recursive: true }),
-  fs.mkdir(Path.state, { recursive: true }),
-  fs.mkdir(Path.tmp, { recursive: true }),
-  fs.mkdir(Path.log, { recursive: true }),
-  fs.mkdir(Path.bin, { recursive: true }),
-  fs.mkdir(Path.repos, { recursive: true }),
-])
+const ensureDirectories = () =>
+  Promise.all([
+    fs.mkdir(Path.data, { recursive: true }),
+    fs.mkdir(Path.config, { recursive: true }),
+    fs.mkdir(Path.state, { recursive: true }),
+    fs.mkdir(Path.tmp, { recursive: true }),
+    fs.mkdir(Path.log, { recursive: true }),
+    fs.mkdir(Path.bin, { recursive: true }),
+    fs.mkdir(Path.repos, { recursive: true }),
+  ])
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Global") {}
 
@@ -72,7 +73,10 @@ export function make(input: Partial<Interface> = {}): Interface {
 
 export const layer = Layer.effect(
   Service,
-  Effect.sync(() => Service.of(make())),
+  Effect.gen(function* () {
+    yield* Effect.promise(ensureDirectories)
+    return Service.of(make())
+  }),
 )
 
 export const defaultLayer = layer
@@ -80,7 +84,10 @@ export const defaultLayer = layer
 export const layerWith = (input: Partial<Interface>) =>
   Layer.effect(
     Service,
-    Effect.sync(() => Service.of(make(input))),
+    Effect.gen(function* () {
+      yield* Effect.promise(ensureDirectories)
+      return Service.of(make(input))
+    }),
   )
 
 export * as Global from "./global"

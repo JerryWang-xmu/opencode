@@ -22,6 +22,7 @@ import type { Agent } from "../../src/agent/agent"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, SessionID } from "../../src/session/schema"
+import { Session as SessionNs } from "../../src/session/session"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
@@ -306,6 +307,7 @@ function recordedNativeLLMLayer(scenario: RecordedScenario) {
         HttpRecorder.Cassette.fileSystem({ directory: FIXTURES_DIR }).pipe(Layer.provide(NodeFileSystem.layer)),
       ),
       Layer.provide(RuntimeFlags.layer({ experimentalNativeLlm: true })),
+      Layer.provide(SessionNs.defaultLayer),
     ),
   )
 }

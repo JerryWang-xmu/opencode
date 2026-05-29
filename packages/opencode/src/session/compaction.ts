@@ -92,6 +92,44 @@ type CompletedCompaction = {
   summary: string | undefined
 }
 
+type RecentContext = {
+  files: string[]
+  skills: string[]
+}
+
+function extractRecentContext(messages: MessageV2.WithParts[]): RecentContext {
+  const files = new Set<string>()
+  const skills = new Set<string>()
+
+  // Walk backwards to get most recent context first
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+
+    for (const part of msg.parts) {
+      if (part.type !== "tool") continue
+      if (part.state.status !== "completed") continue
+
+      if (part.tool === "read") {
+        const input = part.state.input as { filePath?: string } | undefined
+        if (input?.filePath) {
+          files.add(input.filePath)
+        }
+      } else if (part.tool === "skill") {
+        const input = part.state.input as { name?: string } | undefined
+        if (input?.name) {
+          skills.add(input.name)
+        }
+      }
+    }
+  }
+
+  return {
+    files: Array.from(files).slice(0, 10), // Limit to 10 most recent files
+    skills: Array.from(skills).slice(0, 5), // Limit to 5 most recent skills
+  }
+}
+
 function summaryText(message: MessageV2.WithParts) {
   const text = message.parts
     .filter((part): part is MessageV2.TextPart => part.type === "text")
@@ -334,8 +372,10 @@ export const layer = Layer.effect(
       if (pruned > PRUNE_MINIMUM) {
         for (const part of toPrune) {
           if (part.state.status === "completed") {
-            part.state.time.compacted = Date.now()
-            yield* session.updatePart(part)
+            yield* session.updatePart({
+              ...part,
+              state: { ...part.state, time: { ...part.state.time, compacted: Date.now() } },
+            })
           }
         }
         log.info("pruned", { count: toPrune.length })
@@ -368,8 +408,10 @@ export const layer = Layer.effect(
           if (!eligibleTools.has(part.tool)) continue
           if (part.state.time.end >= cutoff) continue
 
-          part.state.time.compacted = Date.now()
-          yield* session.updatePart(part)
+          yield* session.updatePart({
+            ...part,
+            state: { ...part.state, time: { ...part.state.time, compacted: Date.now() } },
+          })
           compacted++
         }
       }
@@ -512,6 +554,9 @@ export const layer = Layer.effect(
       }
 
       if (result === "continue" && input.auto) {
+        // Extract recent context (files and skills) before compaction
+        const recentContext = extractRecentContext(history)
+
         if (replay) {
           const original = replay.info
           const replayMsg = yield* session.updateMessage({
@@ -558,6 +603,7 @@ export const layer = Layer.effect(
                 },
                 message: userMessage,
                 overflow: input.overflow === true,
+                recentContext, // Pass recent context to plugin
               },
               { enabled: true },
             )).enabled
@@ -570,11 +616,26 @@ export const layer = Layer.effect(
               agent: userMessage.agent,
               model: userMessage.model,
             })
+            
+            // Build context recovery hint
+            let contextHint = ""
+            if (recentContext.files.length > 0 || recentContext.skills.length > 0) {
+              contextHint = "\n\n**Context Recovery:**\n"
+              if (recentContext.files.length > 0) {
+                contextHint += `Recently accessed files (re-read if needed):\n${recentContext.files.map((f) => `- ${f}`).join("\n")}\n`
+              }
+              if (recentContext.skills.length > 0) {
+                contextHint += `Recently used skills (reload if needed):\n${recentContext.skills.map((s) => `- ${s}`).join("\n")}\n`
+              }
+            }
+            
             const text =
               (input.overflow
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
                 : "") +
-              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
+              "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed." +
+              contextHint
+            
             yield* session.updatePart({
               id: PartID.ascending(),
               messageID: continueMsg.id,

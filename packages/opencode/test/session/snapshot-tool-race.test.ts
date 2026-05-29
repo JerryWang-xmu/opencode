@@ -48,6 +48,8 @@ import { SystemPrompt } from "../../src/session/system"
 import { Todo } from "../../src/session/todo"
 import { SessionCompaction } from "../../src/session/compaction"
 import { Instruction } from "../../src/session/instruction"
+import { MemoryExtraction } from "../../src/memory/extraction"
+import { MemoryAutoDream } from "../../src/memory/autoDream"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionStatus } from "../../src/session/status"
@@ -63,7 +65,6 @@ import { RepositoryCache } from "../../src/reference/repository-cache"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { MemoryExtraction } from "@/memory/extraction"
 
 void Log.init({ print: false })
 
@@ -170,6 +171,7 @@ function makeHttp() {
       Layer.provide(Image.defaultLayer),
       Layer.provide(Reference.defaultLayer),
       Layer.provide(MemoryExtraction.defaultLayer),
+      Layer.provide(MemoryAutoDream.defaultLayer),
       Layer.provide(SessionSummary.defaultLayer),
       Layer.provideMerge(run),
       Layer.provideMerge(compact),

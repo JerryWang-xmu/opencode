@@ -28,6 +28,7 @@ import { MessageV2 } from "../../src/session/message-v2"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
+import { MemoryExtraction } from "../../src/memory/extraction"
 import { Instruction } from "../../src/session/instruction"
 import { SessionProcessor } from "../../src/session/processor"
 import { SessionPrompt } from "../../src/session/prompt"
@@ -55,7 +56,6 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { SyncEvent } from "@/sync"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { MemoryExtraction } from "@/memory/extraction"
 
 void Log.init({ print: false })
 
@@ -2344,4 +2344,155 @@ noLLMServer.instance(
       }
     }),
   30_000,
+)
+
+// Rate limiting with retry through full orchestration
+
+it.instance(
+  "retries on 429 rate limit and succeeds with final response",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Rate limit retry",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.error(429, { type: "error", error: { type: "too_many_requests" } })
+      yield* llm.text("after retry")
+
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "after retry")).toBe(true)
+      expect(yield* llm.calls).toBe(2)
+    }),
+  30_000,
+)
+
+it.instance(
+  "retries on 503 service unavailable and succeeds",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Service unavailable retry",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.error(503, { error: "service unavailable" })
+      yield* llm.text("recovered")
+
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
+      expect(yield* llm.calls).toBe(2)
+    }),
+  30_000,
+)
+
+// Context overflow with compaction through full orchestration
+
+it.instance(
+  "triggers compaction on context length exceeded and continues",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Context overflow",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.error(400, { type: "error", error: { code: "context_length_exceeded" } })
+      yield* llm.text("after compaction")
+
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "hello" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(yield* llm.calls).toBeGreaterThanOrEqual(2)
+    }),
+  30_000,
+)
+
+// Multi-tool sequential execution
+
+it.instance(
+  "executes multiple tool calls sequentially across loop iterations",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Multi-tool sequential",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.tool("glob", { pattern: "**/*.ts" })
+      yield* llm.tool("grep", { pattern: "export", include: "*.ts" })
+      yield* llm.text("done with tools")
+
+      const result = yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        parts: [{ type: "text", text: "find exports" }],
+      })
+
+      expect(result.info.role).toBe("assistant")
+      expect(result.parts.some((part) => part.type === "text" && part.text === "done with tools")).toBe(true)
+      expect(yield* llm.calls).toBe(3)
+
+      const msgs = yield* sessions.messages({ sessionID: session.id })
+      const toolParts = msgs
+        .flatMap((msg) => msg.parts)
+        .filter((part): part is MessageV2.ToolPart => part.type === "tool")
+      expect(toolParts.length).toBeGreaterThanOrEqual(2)
+    }),
+  30_000,
+)
+
+// Stream error handling
+
+it.instance(
+  "handles stream error gracefully and completes loop",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Stream error",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* llm.fail("mid-stream explosion")
+      yield* user(session.id, "hello")
+
+      const result = yield* prompt.loop({ sessionID: session.id })
+      expect(result.info.role).toBe("assistant")
+
+      const msgs = yield* sessions.messages({ sessionID: session.id })
+      const assistants = msgs.filter((msg) => msg.info.role === "assistant")
+      expect(assistants.length).toBeGreaterThanOrEqual(1)
+    }),
+  3_000,
 )

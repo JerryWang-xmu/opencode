@@ -1,5 +1,5 @@
 import { Flag } from "@opencode-ai/core/flag/flag"
-import { Cause, Duration, Effect } from "effect"
+import { Cause, Duration, Effect, Layer } from "effect"
 import { TestLLMServer } from "../../lib/llm-server"
 import type { Config } from "../../../src/config/config"
 import { ModelID, ProviderID } from "../../../src/provider/schema"
@@ -91,12 +91,12 @@ function withContext<A, E>(
           ? yield* trace(options, scenario, `${label} instance load start`).pipe(
               Effect.andThen(
                 modules.InstanceStore.Service.use((store) => store.load({ directory: path })).pipe(
-                  Effect.provide(modules.AppLayer),
+                  Effect.provide(Layer.provideMerge(modules.AppLayer, modules.InstanceBootstrap.defaultLayer)),
                   Effect.catchCause((cause) =>
                     Effect.sleep("100 millis").pipe(
                       Effect.andThen(
                         modules.InstanceStore.Service.use((store) => store.load({ directory: path })).pipe(
-                          Effect.provide(modules.AppLayer),
+                          Effect.provide(Layer.provideMerge(modules.AppLayer, modules.InstanceBootstrap.defaultLayer)),
                         ),
                       ),
                       Effect.catchCause(() => Effect.failCause(cause)),
@@ -108,7 +108,10 @@ function withContext<A, E>(
             )
           : undefined
         const run = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-          effect.pipe(Effect.provideService(modules.InstanceRef, instance), Effect.provide(modules.AppLayer))
+          effect.pipe(
+            Effect.provideService(modules.InstanceRef, instance),
+            Effect.provide(Layer.provideMerge(modules.AppLayer, modules.InstanceBootstrap.defaultLayer)),
+          )
         const directory = () => {
           if (!context.dir?.path) throw new Error("scenario needs a project directory")
           return context.dir.path

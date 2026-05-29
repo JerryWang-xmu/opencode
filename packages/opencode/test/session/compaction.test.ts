@@ -787,6 +787,1022 @@ describe("session.compaction.prune", () => {
   )
 })
 
+describe("session.compaction.microCompact", () => {
+  it.live(
+    "compacts old eligible tool output",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          // Old read tool output (30 minutes ago)
+          const oldTime = Date.now() - 30 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "read",
+            state: {
+              status: "completed",
+              input: {},
+              output: "file contents here",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime },
+            },
+          })
+          // Old grep tool output
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "grep",
+            state: {
+              status: "completed",
+              input: {},
+              output: "grep results",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(2)
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const toolParts = msgs.flatMap((msg) => msg.parts).filter((part) => part.type === "tool")
+          for (const part of toolParts) {
+            if (part.type === "tool" && part.state.status === "completed") {
+              expect(part.state.time.compacted).toBeNumber()
+            }
+          }
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "skips recently completed tool output",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          // Recent read tool output (1 minute ago)
+          const recentTime = Date.now() - 1 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "read",
+            state: {
+              status: "completed",
+              input: {},
+              output: "file contents",
+              title: "done",
+              metadata: {},
+              time: { start: recentTime, end: recentTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(0)
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+          if (part?.type === "tool" && part.state.status === "completed") {
+            expect(part.state.time.compacted).toBeUndefined()
+          }
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "skips protected skill tool output",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          const oldTime = Date.now() - 30 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "skill",
+            state: {
+              status: "completed",
+              input: {},
+              output: "skill output",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(0)
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+          if (part?.type === "tool" && part.state.status === "completed") {
+            expect(part.state.time.compacted).toBeUndefined()
+          }
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "returns 0 when disabled via config",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          const oldTime = Date.now() - 30 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "read",
+            state: {
+              status: "completed",
+              input: {},
+              output: "file contents",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(0)
+        }),
+      {
+        config: {
+          micro_compact: { enabled: false },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "skips already compacted parts",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          const oldTime = Date.now() - 30 * 60 * 1000
+          const alreadyCompactedTime = Date.now() - 15 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "read",
+            state: {
+              status: "completed",
+              input: {},
+              output: "already compacted",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime, compacted: alreadyCompactedTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(0)
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "skips non-eligible tools by default",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          const oldTime = Date.now() - 30 * 60 * 1000
+          // bash is not in default eligible tools ["read", "grep", "glob", "lsp"]
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: {},
+              output: "bash output",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(0)
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "respects custom tools config",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          const oldTime = Date.now() - 30 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: {},
+              output: "bash output",
+              title: "done",
+              metadata: {},
+              time: { start: oldTime, end: oldTime },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(1)
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true, tools: ["bash"] },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "respects custom age_minutes config",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          // 3 minutes ago — within default 10min but outside custom 2min
+          const threeMinAgo = Date.now() - 3 * 60 * 1000
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "read",
+            state: {
+              status: "completed",
+              input: {},
+              output: "file contents",
+              title: "done",
+              metadata: {},
+              time: { start: threeMinAgo, end: threeMinAgo },
+            },
+          })
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(1)
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true, age_minutes: 2 },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "returns 0 when session has no messages",
+    provideTmpdirInstance(
+      () =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+
+          const count = yield* compact.microCompact({ sessionID: info.id })
+
+          expect(count).toBe(0)
+        }),
+      {
+        config: {
+          micro_compact: { enabled: true },
+        },
+      },
+    ),
+  )
+})
+
+describe("session.compaction.prune.edgeCases", () => {
+  it.live(
+    "does nothing when prune config is not set",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: {},
+              output: "x".repeat(200_000),
+              title: "done",
+              metadata: {},
+              time: { start: Date.now(), end: Date.now() },
+            },
+          })
+          for (const text of ["second", "third"]) {
+            const msg = yield* ssn.updateMessage({
+              id: MessageID.ascending(),
+              role: "user",
+              sessionID: info.id,
+              agent: "build",
+              model: ref,
+              time: { created: Date.now() },
+            })
+            yield* ssn.updatePart({
+              id: PartID.ascending(),
+              messageID: msg.id,
+              sessionID: info.id,
+              type: "text",
+              text,
+            })
+          }
+
+          yield* compact.prune({ sessionID: info.id })
+
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+          if (part?.type === "tool" && part.state.status === "completed") {
+            expect(part.state.time.compacted).toBeUndefined()
+          }
+        }),
+    ),
+  )
+
+  it.live(
+    "does nothing when prunable output is below PRUNE_MINIMUM",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          // Small output — well below PRUNE_MINIMUM (20_000 tokens = ~80_000 chars)
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: {},
+              output: "small output",
+              title: "done",
+              metadata: {},
+              time: { start: Date.now(), end: Date.now() },
+            },
+          })
+          for (const text of ["second", "third"]) {
+            const msg = yield* ssn.updateMessage({
+              id: MessageID.ascending(),
+              role: "user",
+              sessionID: info.id,
+              agent: "build",
+              model: ref,
+              time: { created: Date.now() },
+            })
+            yield* ssn.updatePart({
+              id: PartID.ascending(),
+              messageID: msg.id,
+              sessionID: info.id,
+              type: "text",
+              text,
+            })
+          }
+
+          yield* compact.prune({ sessionID: info.id })
+
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+          if (part?.type === "tool" && part.state.status === "completed") {
+            expect(part.state.time.compacted).toBeUndefined()
+          }
+        }),
+      {
+        config: {
+          compaction: { prune: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "skips already compacted tool output and stops scanning",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          // Large output but already compacted — should stop scanning at this part
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: {},
+              output: "x".repeat(200_000),
+              title: "done",
+              metadata: {},
+              time: { start: Date.now(), end: Date.now(), compacted: Date.now() - 1000 },
+            },
+          })
+          for (const text of ["second", "third"]) {
+            const msg = yield* ssn.updateMessage({
+              id: MessageID.ascending(),
+              role: "user",
+              sessionID: info.id,
+              agent: "build",
+              model: ref,
+              time: { created: Date.now() },
+            })
+            yield* ssn.updatePart({
+              id: PartID.ascending(),
+              messageID: msg.id,
+              sessionID: info.id,
+              type: "text",
+              text,
+            })
+          }
+
+          yield* compact.prune({ sessionID: info.id })
+
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+          if (part?.type === "tool" && part.state.status === "completed") {
+            // Should still have the original compacted timestamp, not a new one
+            expect(part.state.time.compacted).toBeLessThan(Date.now() - 500)
+          }
+        }),
+      {
+        config: {
+          compaction: { prune: true },
+        },
+      },
+    ),
+  )
+
+  it.live(
+    "skips first turn and only prunes from second turn onwards",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const compact = yield* SessionCompaction.Service
+          const ssn = yield* SessionNs.Service
+          const info = yield* ssn.create({})
+          // First turn with large output
+          const a = yield* ssn.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: info.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: a.id,
+            sessionID: info.id,
+            type: "text",
+            text: "first",
+          })
+          const b: MessageV2.Assistant = {
+            id: MessageID.ascending(),
+            role: "assistant",
+            sessionID: info.id,
+            mode: "build",
+            agent: "build",
+            path: { cwd: dir, root: dir },
+            cost: 0,
+            tokens: {
+              output: 0,
+              input: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: ref.modelID,
+            providerID: ref.providerID,
+            parentID: a.id,
+            time: { created: Date.now() },
+            finish: "end_turn",
+          }
+          yield* ssn.updateMessage(b)
+          yield* ssn.updatePart({
+            id: PartID.ascending(),
+            messageID: b.id,
+            sessionID: info.id,
+            type: "tool",
+            callID: crypto.randomUUID(),
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: {},
+              output: "x".repeat(200_000),
+              title: "done",
+              metadata: {},
+              time: { start: Date.now(), end: Date.now() },
+            },
+          })
+          // Only one turn — no second user message
+          // Prune requires at least 2 turns (skips first turn)
+
+          yield* compact.prune({ sessionID: info.id })
+
+          const msgs = yield* ssn.messages({ sessionID: info.id })
+          const part = msgs.flatMap((msg) => msg.parts).find((part) => part.type === "tool")
+          if (part?.type === "tool" && part.state.status === "completed") {
+            expect(part.state.time.compacted).toBeUndefined()
+          }
+        }),
+      {
+        config: {
+          compaction: { prune: true },
+        },
+      },
+    ),
+  )
+})
+
 describe("session.compaction.process", () => {
   it.instance(
     "throws when parent is not a user message",

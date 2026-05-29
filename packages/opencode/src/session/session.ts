@@ -102,6 +102,7 @@ export function fromRow(row: SessionRow): Info {
     share,
     revert,
     permission: row.permission ? [...row.permission] : undefined,
+    latchedHeaders: row.latched_headers ?? undefined,
     time: {
       created: row.time_created,
       updated: row.time_updated,
@@ -137,6 +138,7 @@ export function toRow(info: Info) {
     tokens_cache_write: (info.tokens ?? EmptyTokens).cache.write,
     revert: info.revert ?? null,
     permission: info.permission,
+    latched_headers: info.latchedHeaders ?? null,
     time_created: info.time.created,
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
@@ -224,6 +226,7 @@ export const Info = Schema.Struct({
   time: Time,
   permission: optionalOmitUndefined(Permission.Ruleset),
   revert: optionalOmitUndefined(Revert),
+  latchedHeaders: optionalOmitUndefined(Schema.Record(Schema.String, Schema.String)),
 }).annotate({ identifier: "Session" })
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
 
@@ -323,6 +326,7 @@ const UpdatedInfo = Schema.Struct({
   time: Schema.optional(UpdatedTime),
   permission: Schema.optional(Schema.NullOr(Permission.Ruleset)),
   revert: Schema.optional(Schema.NullOr(Revert)),
+  latchedHeaders: Schema.optional(Schema.NullOr(Schema.Record(Schema.String, Schema.String))),
 })
 
 const UpdatedEventSchema = Schema.Struct({
@@ -471,6 +475,11 @@ export interface Interface {
   }) => Effect.Effect<void>
   readonly clearRevert: (sessionID: SessionID) => Effect.Effect<void>
   readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] }) => Effect.Effect<void>
+  readonly setLatchedHeaders: (input: {
+    sessionID: SessionID
+    headers: Record<string, string>
+  }) => Effect.Effect<void>
+  readonly clearLatchedHeaders: (sessionID: SessionID) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<MessageV2.WithParts[], NotFound>
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
@@ -758,6 +767,17 @@ export const layer: Layer.Layer<
       yield* patch(input.sessionID, { time: { updated: Date.now() }, summary: input.summary })
     })
 
+    const setLatchedHeaders = Effect.fn("Session.setLatchedHeaders")(function* (input: {
+      sessionID: SessionID
+      headers: Record<string, string>
+    }) {
+      yield* patch(input.sessionID, { time: { updated: Date.now() }, latchedHeaders: input.headers })
+    })
+
+    const clearLatchedHeaders = Effect.fn("Session.clearLatchedHeaders")(function* (sessionID: SessionID) {
+      yield* patch(sessionID, { time: { updated: Date.now() }, latchedHeaders: null })
+    })
+
     const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
       return yield* storage
         .read<Snapshot.FileDiff[]>(["session_diff", sessionID])
@@ -848,6 +868,8 @@ export const layer: Layer.Layer<
       setRevert,
       clearRevert,
       setSummary,
+      setLatchedHeaders,
+      clearLatchedHeaders,
       diff,
       messages,
       children,

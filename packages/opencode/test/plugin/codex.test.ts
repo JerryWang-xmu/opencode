@@ -191,6 +191,11 @@ describe("plugin.codex", () => {
         },
         serverUrl: new URL("https://example.com"),
         $: {} as never,
+        llm: {
+          async query() {
+            return ""
+          },
+        },
       },
       {
         issuer: server.url.origin,

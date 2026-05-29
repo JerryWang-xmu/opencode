@@ -61,6 +61,7 @@ export interface Def<
   execute(args: Schema.Schema.Type<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
   formatValidationError?(error: unknown): string
   concurrency?: { mode: "parallel" | "serial" }
+  shouldDefer?: boolean
 }
 export type DefWithoutID<
   Parameters extends Schema.Decoder<unknown> = Schema.Decoder<unknown>,

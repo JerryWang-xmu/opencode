@@ -21,9 +21,13 @@ import { AzureAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { Effect, Layer, Context, Stream } from "effect"
+import { LLM } from "@/session/llm"
+import { LLMEvent } from "@opencode-ai/llm"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { errorMessage } from "@/util/error"
+import { SessionID, MessageID } from "@/session/schema"
+import { ProviderID, ModelID } from "@/provider/schema"
 import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { registerAdapter } from "@/control-plane/adapters"
@@ -31,6 +35,29 @@ import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 
 const log = Log.create({ service: "plugin" })
+
+export const MAX_PLUGIN_LLM_CALLS = 10
+
+type QueryFn = (
+  prompt: string,
+  options?: { model?: string; system?: string; temperature?: number },
+) => Promise<string>
+
+export function createRateLimitedQuery(queryFn: QueryFn): QueryFn & { callCount: number } {
+  let count = 0
+  const wrapped = ((prompt: string, options?: { model?: string; system?: string; temperature?: number }) => {
+    if (count >= MAX_PLUGIN_LLM_CALLS)
+      return Promise.reject(
+        new Error(`Plugin LLM rate limit exceeded (max ${MAX_PLUGIN_LLM_CALLS} calls per session)`),
+      )
+    return queryFn(prompt, options).then((result) => {
+      count++
+      return result
+    })
+  }) as QueryFn & { callCount: number }
+  Object.defineProperty(wrapped, "callCount", { get: () => count })
+  return wrapped
+}
 
 type State = {
   hooks: Hooks[]
@@ -109,6 +136,56 @@ async function applyPlugin(load: PluginLoader.Loaded, input: PluginInput, hooks:
   }
 }
 
+function createPluginQueryFn(cfg: Config.Info, bridge: EffectBridge.Shape) {
+  return async (prompt: string, options?: { model?: string; system?: string; temperature?: number }) => {
+    // Provider has circular dep with plugin (provider → plugin → provider), keep dynamic
+    const { Provider } = await import("@/provider/provider")
+
+    const effect = Effect.gen(function* () {
+      const llm = yield* LLM.Service
+      const provider = yield* Provider.Service
+
+      // Resolve model: options.model > config.model > provider default
+      const modelConfig = options?.model ?? cfg.model
+      const resolved = modelConfig
+        ? (() => {
+            const [p, m] = modelConfig.split("/")
+            return { providerID: ProviderID.make(p), modelID: ModelID.make(m) }
+          })()
+        : yield* provider.defaultModel()
+
+      const model = yield* provider.getModel(resolved.providerID, resolved.modelID)
+
+      // Generate unique IDs for each plugin query
+      const sessionID = SessionID.descending()
+      const messageID = MessageID.ascending()
+
+      const stream = llm.stream({
+        user: {
+          id: messageID,
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          model: { providerID: resolved.providerID, modelID: resolved.modelID },
+          agent: "build",
+        },
+        sessionID,
+        model,
+        agent: { name: "build", mode: "primary", permission: [], options: {} },
+        system: options?.system ? [options.system] : [],
+        messages: [{ role: "user", content: prompt }],
+        tools: {},
+      })
+
+      const events = yield* Stream.runCollect(stream)
+      return events.filter(LLMEvent.is.textDelta).map((e) => e.text).join("")
+    })
+
+    // Use bridge to preserve current Effect context
+    return await bridge.promise(effect)
+  }
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -134,7 +211,8 @@ export const layer = Layer.effect(
           fetch: async (...args) => Server.Default().app.fetch(...args),
         })
         const cfg = yield* config.get()
-        const input: PluginInput = {
+        
+        const baseInput = {
           client,
           project: ctx.project,
           worktree: ctx.worktree,
@@ -147,14 +225,22 @@ export const layer = Layer.effect(
           get serverUrl(): URL {
             return Server.url ?? new URL("http://localhost:4096")
           },
-          // @ts-expect-error
           $: typeof Bun === "undefined" ? undefined : Bun.$,
+        }
+
+        function makePluginInput(): PluginInput {
+          return {
+            ...baseInput,
+            llm: {
+              query: createRateLimitedQuery(createPluginQueryFn(cfg, bridge)),
+            },
+          } as PluginInput
         }
 
         for (const plugin of flags.disableDefaultPlugins ? [] : INTERNAL_PLUGINS) {
           log.info("loading internal plugin", { name: plugin.name })
           const init = yield* Effect.tryPromise({
-            try: () => plugin(input),
+            try: () => plugin(makePluginInput()),
             catch: (err) => {
               log.error("failed to load internal plugin", { name: plugin.name, error: err })
             },
@@ -215,7 +301,7 @@ export const layer = Layer.effect(
           // Keep plugin execution sequential so hook registration and execution
           // order remains deterministic across plugin runs.
           yield* Effect.tryPromise({
-            try: () => applyPlugin(load, input, hooks),
+            try: () => applyPlugin(load, makePluginInput(), hooks),
             catch: (err) => {
               const message = errorMessage(err)
               log.error("failed to load plugin", { path: load.spec, error: message })

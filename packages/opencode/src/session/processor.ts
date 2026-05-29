@@ -8,7 +8,7 @@ import { Permission } from "@/permission"
 import { Plugin } from "@/plugin"
 import { Snapshot } from "@/snapshot"
 import * as Session from "./session"
-import { LLM } from "./llm"
+import { LLM, LLMFallbackError } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { isOverflow } from "./overflow"
 import { PartID } from "./schema"
@@ -123,7 +123,7 @@ export const layer = Layer.effect(
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
 
       const parse = (e: unknown) =>
-        MessageV2.fromError(e, {
+        MessageV2.fromError(e instanceof LLMFallbackError ? e.cause : e, {
           providerID: input.model.providerID,
           aborted,
         })
@@ -810,6 +810,7 @@ export const layer = Layer.effect(
             Effect.retry(
               SessionRetry.policy({
                 provider: input.model.providerID,
+                querySource: streamInput.querySource ?? "foreground",
                 parse,
                 set: (info) => {
                   // TODO(v2): Temporary dual-write while migrating session messages to v2 events.

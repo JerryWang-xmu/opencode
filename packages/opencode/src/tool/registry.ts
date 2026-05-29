@@ -30,10 +30,11 @@ import * as Log from "@opencode-ai/core/util/log"
 import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
+import { ModelTools } from "@/util/model-tools"
 import { Glob } from "@opencode-ai/core/util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context } from "effect"
+import { Effect, Layer, Context, Ref } from "effect"
 import { FetchHttpClient, HttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -48,6 +49,7 @@ import { Instruction } from "../session/instruction"
 import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { Bus } from "../bus"
 import { Agent } from "../agent/agent"
+import { createToolSearchExecute, type ToolSearchParams } from "./tool_search"
 import { Git } from "@/git"
 import { Skill } from "../skill"
 import { Permission } from "@/permission"
@@ -68,6 +70,7 @@ type ReadDef = Tool.InferDef<typeof ReadTool>
 type State = {
   custom: Tool.Def[]
   builtin: Tool.Def[]
+  deferred: Tool.Def[]
   task: TaskDef
   read: ReadDef
 }
@@ -75,6 +78,8 @@ type State = {
 export interface Interface {
   readonly ids: () => Effect.Effect<string[]>
   readonly all: () => Effect.Effect<Tool.Def[]>
+  readonly deferred: () => Effect.Effect<Tool.Def[]>
+  readonly activateDeferred: (ids: string[]) => Effect.Effect<void>
   readonly named: () => Effect.Effect<{ task: TaskDef; read: ReadDef }>
   readonly tools: (model: { providerID: ProviderID; modelID: ModelID; agent: Agent.Info }) => Effect.Effect<Tool.Def[]>
 }
@@ -137,6 +142,8 @@ export const layer: Layer.Layer<
     const patchtool = yield* ApplyPatchTool
     const skilltool = yield* SkillTool
     const agent = yield* Agent.Service
+
+    const activated = yield* Ref.make<Tool.Def[]>([])
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("ToolRegistry.state")(function* (ctx) {
@@ -248,6 +255,33 @@ export const layer: Layer.Layer<
           plan: Tool.init(plan),
         })
 
+        // Create tool_search tool with access to deferred tools
+        const toolSearchDef: Tool.Def = {
+          id: "tool_search",
+          description: `Search for and load deferred tools that are not immediately available.
+
+Use this tool when you need a tool that is not in your current tool list. This allows you to discover and load specialized tools on-demand.
+
+Example use cases:
+- Looking for a tool to handle a specific file format
+- Finding tools for specialized operations
+- Discovering tools for particular domains
+
+The tool will return a list of matching tools with their descriptions.`,
+          parameters: Schema.Struct({
+            query: Schema.String.annotate({
+              description: "Search query describing what kind of tool you need",
+            }),
+            limit: Schema.optional(Schema.Number).annotate({
+              description: "Maximum number of results to return (default: 5)",
+            }),
+          }),
+          execute: createToolSearchExecute(
+            () => deferred(),
+            (ids) => activateDeferred(ids),
+          ),
+        }
+
         return {
           custom,
           builtin: [
@@ -264,9 +298,12 @@ export const layer: Layer.Layer<
             tool.fetch,
             tool.todo,
             tool.search,
-            ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
             tool.skill,
             tool.patch,
+            toolSearchDef,
+          ],
+          deferred: [
+            ...(flags.experimentalScout ? [tool.repo_clone, tool.repo_overview] : []),
             ...(flags.experimentalLspTool ? [tool.lsp] : []),
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
@@ -278,8 +315,25 @@ export const layer: Layer.Layer<
 
     const all: Interface["all"] = Effect.fn("ToolRegistry.all")(function* () {
       const s = yield* InstanceState.get(state)
-      return [...s.builtin, ...s.custom] as Tool.Def[]
+      const activatedTools = yield* Ref.get(activated)
+      return [...s.builtin, ...s.custom, ...activatedTools] as Tool.Def[]
     })
+
+    const deferred: Interface["deferred"] = Effect.fn("ToolRegistry.deferred")(function* () {
+      const s = yield* InstanceState.get(state)
+      return s.deferred
+    })
+
+    const activateDeferred: Interface["activateDeferred"] = Effect.fn("ToolRegistry.activateDeferred")(
+      function* (ids: string[]) {
+        const s = yield* InstanceState.get(state)
+        yield* Ref.update(activated, (current) => {
+          const existing = new Set(current.map((t) => t.id))
+          const toAdd = s.deferred.filter((t) => ids.includes(t.id) && !existing.has(t.id))
+          return [...current, ...toAdd]
+        })
+      },
+    )
 
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
       return (yield* all()).map((tool) => tool.id)
@@ -325,8 +379,7 @@ export const layer: Layer.Layer<
           return webSearchEnabled(input.providerID, { exa: flags.enableExa, parallel: flags.enableParallel })
         }
 
-        const usePatch =
-          input.modelID.includes("gpt-") && !input.modelID.includes("oss") && !input.modelID.includes("gpt-4")
+        const usePatch = ModelTools.shouldUseApplyPatch(input.modelID)
         if (tool.id === ApplyPatchTool.id) return usePatch
         if (tool.id === EditTool.id || tool.id === WriteTool.id) return !usePatch
 
@@ -371,7 +424,7 @@ export const layer: Layer.Layer<
       return { task: s.task, read: s.read }
     })
 
-    return Service.of({ ids, all, named, tools })
+    return Service.of({ ids, all, deferred, activateDeferred, named, tools })
   }),
 )
 

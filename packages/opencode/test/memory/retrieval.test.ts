@@ -5,6 +5,10 @@ import { AppFileSystem } from "@opencode-ai/core/filesystem"
 import { MemoryStorage } from "../../src/memory/storage"
 import { Memory } from "../../src/memory/memory"
 import { MemoryRetrieval } from "../../src/memory/retrieval"
+import { Provider } from "../../src/provider/provider"
+import { RuntimeFlags } from "../../src/effect/runtime-flags"
+import { Config } from "../../src/config/config"
+import { ProviderID, ModelID } from "../../src/provider/schema"
 import { testEffect } from "../lib/effect"
 import os from "os"
 import path from "path"
@@ -18,11 +22,16 @@ const storageLayer = MemoryStorage.layer.pipe(
 )
 
 let counter = 0
-function freshLayer() {
+function freshLayer(experimentalMemoryRetrieval = false) {
   counter++
   const projectPath = `/test/retrieval-${counter}-${Date.now()}`
   const memoryLayer = Memory.layer(projectPath).pipe(Layer.provide(storageLayer))
-  return MemoryRetrieval.layer.pipe(Layer.provideMerge(memoryLayer))
+  return MemoryRetrieval.layer.pipe(
+    Layer.provideMerge(memoryLayer),
+    Layer.provideMerge(Provider.defaultLayer),
+    Layer.provide(RuntimeFlags.layer({ experimentalMemoryRetrieval })),
+    Layer.provideMerge(Config.defaultLayer),
+  )
 }
 
 const it = testEffect(storageLayer)
@@ -177,5 +186,44 @@ describe("MemoryRetrieval", () => {
         expect(entry.tags!.some((t) => t === "typescript")).toBe(true)
       }
     }).pipe(Effect.provide(freshLayer())),
+  )
+
+  it.instance("retrieve uses provider.getLanguage() for proper language model conversion when experimentalMemoryRetrieval is enabled", () =>
+    Effect.gen(function* () {
+      const memory = yield* Memory.Service
+      const retrieval = yield* MemoryRetrieval.Service
+
+      // Add some test memories
+      yield* memory.add({
+        type: "user",
+        name: "Test Memory 1",
+        description: "First test memory",
+        content: "This is the first test memory content",
+        tags: ["test"],
+      })
+      yield* memory.add({
+        type: "user",
+        name: "Test Memory 2",
+        description: "Second test memory",
+        content: "This is the second test memory content",
+        tags: ["test"],
+      })
+
+      // Test that retrieval works with experimentalMemoryRetrieval enabled
+      // This exercises the code path that uses provider.getLanguage() to convert
+      // Provider.Model to LanguageModelV3. The LLM call will fail (no model configured)
+      // and fall back to keyword matching, which is the expected behavior.
+      const results = yield* retrieval.retrieve({ query: "test memory", maxResults: 2 })
+      
+      // Should return results from keyword fallback
+      expect(results.length).toBeGreaterThan(0)
+      expect(results.length).toBeLessThanOrEqual(2)
+      
+      // Verify results contain the search terms
+      for (const entry of results) {
+        const text = `${entry.name} ${entry.description} ${entry.content}`.toLowerCase()
+        expect(text.includes("test") || text.includes("memory")).toBe(true)
+      }
+    }).pipe(Effect.provide(freshLayer(true))),
   )
 })

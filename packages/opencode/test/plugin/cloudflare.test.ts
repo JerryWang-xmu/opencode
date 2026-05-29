@@ -11,6 +11,9 @@ const pluginInput = {
   },
   serverUrl: new URL("https://example.com"),
   $: {} as never,
+  llm: {
+    query: async () => "",
+  },
 }
 
 function makeHookInput(overrides: { providerID?: string; apiId?: string; reasoning?: boolean }) {

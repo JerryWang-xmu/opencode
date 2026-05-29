@@ -55,21 +55,19 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer: Layer.Layer<Service> = layer.pipe(
-  Layer.provide([
-    Bus.layer,
-    Config.defaultLayer,
-    File.defaultLayer,
-    FileWatcher.defaultLayer,
-    Format.defaultLayer,
-    LSP.defaultLayer,
-    Plugin.defaultLayer,
-    Project.defaultLayer,
-    Reference.defaultLayer,
-    ShareNext.defaultLayer,
-    Snapshot.defaultLayer,
-    Vcs.defaultLayer,
-  ]),
+export const defaultLayer = layer.pipe(
+  Layer.provide(Bus.layer),
+  Layer.provide(Config.defaultLayer),
+  Layer.provide(File.defaultLayer),
+  Layer.provide(FileWatcher.defaultLayer),
+  Layer.provide(Format.defaultLayer),
+  Layer.provide(LSP.defaultLayer),
+  Layer.provide(Plugin.defaultLayer),
+  Layer.provide(Project.defaultLayer),
+  Layer.provide(Reference.defaultLayer),
+  Layer.provide(ShareNext.defaultLayer),
+  Layer.provide(Snapshot.defaultLayer),
+  Layer.provide(Vcs.defaultLayer),
 )
 
 export * as InstanceBootstrap from "./bootstrap"

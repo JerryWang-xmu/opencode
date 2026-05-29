@@ -228,6 +228,11 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
     },
     serverUrl: new URL("https://example.com"),
     $: {} as never,
+    llm: {
+      async query() {
+        return ""
+      },
+    },
   })
 
   const models = await hooks.provider!.models!(
